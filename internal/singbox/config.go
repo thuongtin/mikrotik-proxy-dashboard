@@ -5,10 +5,17 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/config"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/proxy"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/config"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/proxy"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/state"
 )
+
+// fakeIPTTL is the TTL, in seconds, of FakeIP answers. sing-box uses 600 by
+// default. A device keeps those 198.18.0.0/15 answers in its DNS cache after it
+// is switched back to direct, and they are not routable outside sing-box, so
+// sites failed to load for up to 10 minutes. FakeIP answers come from memory,
+// so a short TTL costs only a LAN round trip per lookup.
+const fakeIPTTL = 1
 
 // GenerateConfig produces sing-box v1.12+ JSON configuration matching strict zero-leak specifications.
 func GenerateConfig(cfg *config.Config, st *state.State) ([]byte, error) {
@@ -117,6 +124,7 @@ func GenerateConfig(cfg *config.Config, st *state.State) ([]byte, error) {
 			"query_type":     []string{"A"},
 			"action":         "route",
 			"server":         "dns-fakeip",
+			"rewrite_ttl":    fakeIPTTL,
 		})
 		dnsRules = append(dnsRules, map[string]interface{}{
 			"source_ip_cidr": []string{cidr},

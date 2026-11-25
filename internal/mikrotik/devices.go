@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/state"
 )
 
 // Device represents a discovered or configured LAN host.
@@ -26,14 +26,14 @@ type Device struct {
 }
 
 type dhcpLease struct {
-	ID        string `json:".id"`
-	Address   string `json:"address"`
-	MAC       string `json:"mac-address"`
-	HostName  string `json:"host-name"`
-	Comment   string `json:"comment"`
-	Status    string `json:"status"`
-	Dynamic   string `json:"dynamic"`
-	Disabled  string `json:"disabled"`
+	ID       string `json:".id"`
+	Address  string `json:"address"`
+	MAC      string `json:"mac-address"`
+	HostName string `json:"host-name"`
+	Comment  string `json:"comment"`
+	Status   string `json:"status"`
+	Dynamic  string `json:"dynamic"`
+	Disabled string `json:"disabled"`
 }
 
 type arpEntry struct {
@@ -54,11 +54,15 @@ func (c *Client) GetDevices(ctx context.Context, lanCIDR string, st *state.State
 
 	// 1. Fetch DHCP leases
 	var leases []dhcpLease
-	_ = c.Do(ctx, "GET", "/ip/dhcp-server/lease", nil, &leases)
+	if err := c.Do(ctx, "GET", "/ip/dhcp-server/lease", nil, &leases); err != nil {
+		return nil, fmt.Errorf("failed to query DHCP leases: %w", err)
+	}
 
 	// 2. Fetch ARP entries
 	var arpEntries []arpEntry
-	_ = c.Do(ctx, "GET", "/ip/arp", nil, &arpEntries)
+	if err := c.Do(ctx, "GET", "/ip/arp", nil, &arpEntries); err != nil {
+		return nil, fmt.Errorf("failed to query ARP table: %w", err)
+	}
 
 	deviceMap := make(map[string]*Device)
 
@@ -187,8 +191,13 @@ func SortDevices(devs []*Device) {
 	})
 }
 
-// EnsureStaticLease converts a dynamic DHCP lease to static so device IP never shifts.
+// EnsureStaticLease makes sure targetIP is bound to targetMAC by a static,
+// enabled DHCP lease so the device IP never shifts to another host.
 func (c *Client) EnsureStaticLease(ctx context.Context, targetIP, targetMAC string) error {
+	if targetMAC == "" {
+		return fmt.Errorf("cannot bind %s: MAC address is required", targetIP)
+	}
+
 	var leases []dhcpLease
 	err := c.Do(ctx, "GET", "/ip/dhcp-server/lease", nil, &leases)
 	if err != nil {
@@ -196,28 +205,34 @@ func (c *Client) EnsureStaticLease(ctx context.Context, targetIP, targetMAC stri
 	}
 
 	for _, l := range leases {
-		if l.Address == targetIP {
-			if l.Dynamic == "true" {
-				// Call make-static
-				payload := map[string]string{
-					".id": l.ID,
-				}
-				if err := c.Do(ctx, "POST", "/ip/dhcp-server/lease/make-static", payload, nil); err != nil {
-					return fmt.Errorf("failed to make lease static for %s: %w", targetIP, err)
-				}
-			}
-			return nil
+		if l.Address != targetIP {
+			continue
 		}
+		if !strings.EqualFold(l.MAC, targetMAC) {
+			return fmt.Errorf("DHCP lease for %s belongs to MAC %s, not %s", targetIP, strings.ToLower(l.MAC), strings.ToLower(targetMAC))
+		}
+		if l.Disabled == "true" {
+			return fmt.Errorf("DHCP lease for %s is disabled on the router", targetIP)
+		}
+		if l.Dynamic == "true" {
+			payload := map[string]string{
+				".id": l.ID,
+			}
+			if err := c.Do(ctx, "POST", "/ip/dhcp-server/lease/make-static", payload, nil); err != nil {
+				return fmt.Errorf("failed to make lease static for %s: %w", targetIP, err)
+			}
+		}
+		return nil
 	}
 
-	// If no lease existed at all and targetMAC is provided, create static lease
-	if targetMAC != "" {
-		payload := map[string]interface{}{
-			"address":     targetIP,
-			"mac-address": targetMAC,
-			"comment":     "proxy-dash:static-reservation",
-		}
-		_ = c.Do(ctx, "PUT", "/ip/dhcp-server/lease", payload, nil)
+	// No lease exists for this IP (device with a manually set address): reserve it.
+	payload := map[string]interface{}{
+		"address":     targetIP,
+		"mac-address": targetMAC,
+		"comment":     "proxy-dash:static-reservation",
+	}
+	if err := c.Do(ctx, "PUT", "/ip/dhcp-server/lease", payload, nil); err != nil {
+		return fmt.Errorf("failed to create static lease for %s: %w", targetIP, err)
 	}
 
 	return nil

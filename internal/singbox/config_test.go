@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/config"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/proxy"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/config"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/proxy"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/state"
 )
 
 func TestGenerateConfigAndSingboxCheck(t *testing.T) {
@@ -139,6 +139,10 @@ func TestGenerateConfigAndSingboxCheck(t *testing.T) {
 	// Assertions for Zero-Leak Fail-Closed Rules
 	if !strings.Contains(cfgStr, `"dns-fakeip"`) {
 		t.Fatalf("missing dns-fakeip server")
+	}
+	// A long FakeIP TTL breaks a device for minutes after it goes back to direct.
+	if !strings.Contains(cfgStr, `"rewrite_ttl": 1`) {
+		t.Fatalf("FakeIP rule must rewrite the TTL to 1 second")
 	}
 	if !strings.Contains(cfgStr, `"dns-doh-p-vless"`) {
 		t.Fatalf("missing DoH server for assigned proxy")

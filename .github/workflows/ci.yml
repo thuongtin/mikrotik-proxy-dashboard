@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: vet, test, govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Runs the Dockerfile "check" stage: the same pinned Go toolchain and
+      # sing-box binary that the release image is built with.
+      - name: Run checks in the pinned toolchain
+        run: docker build --target check --progress plain .
+
+  lint:
+    name: format and frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "Files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+      - name: JavaScript syntax
+        run: for f in web/dist/*.js; do node --check "$f"; done
+      - name: Translation catalogs
+        run: node scripts/check-i18n.mjs

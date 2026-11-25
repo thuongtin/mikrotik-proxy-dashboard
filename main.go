@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/auth"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/config"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/mikrotik"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/singbox"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
-	internalweb "github.com/ethan/mikrotik-proxy-dashboard/internal/web"
-	webfs "github.com/ethan/mikrotik-proxy-dashboard/web"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/auth"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/config"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/mikrotik"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/singbox"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/state"
+	internalweb "github.com/thuongtin/mikrotik-proxy-dashboard/internal/web"
+	webfs "github.com/thuongtin/mikrotik-proxy-dashboard/web"
 )
 
 var (
@@ -77,9 +77,19 @@ func main() {
 	}
 
 	// 4. Initialize MikroTik REST API client
-	mkClient, err := mikrotik.NewClient(cfg.MikroTikURL, cfg.MikroTikUser, cfg.MikroTikPass, cfg.MikroTikInsecureTLS)
+	if cfg.MikroTikInsecureTLS {
+		log.Println("WARNING: MIKROTIK_INSECURE_TLS=true, the RouterOS certificate is NOT verified. Set MIKROTIK_CA_FILE instead.")
+	}
+	if cfg.MikroTikUser == "admin" {
+		log.Println("WARNING: MIKROTIK_USER is 'admin'. Use a dedicated RouterOS user with a restricted group.")
+	}
+	mkClient, err := mikrotik.NewClient(cfg.MikroTikURL, cfg.MikroTikUser, cfg.MikroTikPass, mikrotik.Options{
+		InsecureTLS: cfg.MikroTikInsecureTLS,
+		CAFile:      cfg.MikroTikCAFile,
+	})
 	if err != nil {
-		log.Printf("Warning: failed to initialize MikroTik client: %v", err)
+		mkClient = nil
+		log.Printf("ERROR: cannot initialize the RouterOS client, device and status pages will return 503 until this is fixed: %v", err)
 	} else {
 		// Run initial reconciliation with RouterOS in background
 		go func() {
@@ -87,7 +97,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			if err := mkClient.Reconcile(ctx, st); err != nil {
-				log.Printf("RouterOS initial reconciliation status: %v", err)
+				log.Printf("RouterOS initial reconciliation FAILED, router rules may not match saved assignments: %v", err)
 			} else {
 				log.Println("RouterOS rules reconciled successfully")
 			}
@@ -99,10 +109,13 @@ func main() {
 	srv := internalweb.NewServer(cfg, authMgr, st, sup, mkClient, staticFS)
 
 	httpServer := &http.Server{
-		Addr:         cfg.ListenAddr,
-		Handler:      srv,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		Addr:              cfg.ListenAddr,
+		Handler:           srv,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 	}
 
 	// Channel to listen for OS signals

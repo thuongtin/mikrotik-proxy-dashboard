@@ -1,226 +1,367 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MikroTik Proxy Dashboard | RouterOS 7.25 Zero-Leak Gateway</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="no-referrer">
+  <title>Proxy Gateway</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <script src="theme.js"></script>
+  <script src="i18n.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Icon sprite: each icon is referenced with <svg><use href="#i-name"></use></svg> -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.9 7.5-9.5V6L12 3Z"/></symbol>
+    <symbol id="i-shield-check" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.9 7.5-9.5V6L12 3Z"/><path d="m8.8 12 2.2 2.2 4.4-4.4"/></symbol>
+    <symbol id="i-shield-alert" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.9 7.5-9.5V6L12 3Z"/><path d="M12 8v4.5"/><path d="M12 16h.01"/></symbol>
+    <symbol id="i-shield-off" viewBox="0 0 24 24"><path d="M19.5 11.5V6L12 3 8.3 4.5"/><path d="M5.2 5.6 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 2-.6 3.8-1.8 5.1-3.3"/><path d="m3 3 18 18"/></symbol>
+    <symbol id="i-shield-question" viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.3 7.5 9.5 4.3-1.2 7.5-4.9 7.5-9.5V6L12 3Z"/><path d="M9.8 9.6a2.3 2.3 0 0 1 4.4.8c0 1.5-2.2 2-2.2 3.2"/><path d="M12 16.6h.01"/></symbol>
+    <symbol id="i-router" viewBox="0 0 24 24"><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 16.5h.01M11 16.5h.01"/><path d="M15 16.5h3"/><path d="M8.5 9.5a5 5 0 0 1 7 0"/><path d="M5.8 6.8a9 9 0 0 1 12.4 0"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a6.8 6.8 0 0 0 11 11Z"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5"/><path d="M5 12h11"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="m13.5 6.5 4 4"/></symbol>
+    <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.8"/><circle cx="6" cy="18" r="2.8"/><path d="M8.2 7.8 20 18M8.2 16.2 20 6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.6L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 13a8 8 0 0 0 14.3 4.6L20 15.5"/><path d="M20 20v-4.5h-4.5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M9.5 7V4.5h5V7"/><path d="M6.5 7l.8 12a2 2 0 0 0 2 1.9h5.4a2 2 0 0 0 2-1.9l.8-12"/><path d="M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.3 12.2 2.5 2.5 5-5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.8 17.5A2 2 0 0 0 4.5 20.5h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5"/><path d="M12 16.2h.01"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><path d="M12 7.8h.01"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10 5.7a9.4 9.4 0 0 1 2-.2c6 0 9.5 6.5 9.5 6.5a16 16 0 0 1-2.6 3.4"/><path d="M6.3 7.3A15.6 15.6 0 0 0 2.5 12S6 18.5 12 18.5c1.8 0 3.3-.5 4.6-1.3"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m3 3 18 18"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2"/><path d="M15.5 8.5V5.5a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H16a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h7.5"/></symbol>
+    <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.7L4 15.5"/><path d="M4 20v-4.5h4.5"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2.5 4.5 13.5H12l-1 8 8.5-11H12l1-8Z"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 8.5-8.5"/><path d="m16.5 6.5 2.5 2.5"/><path d="m14.5 8.5 2 2"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="i-tablet" viewBox="0 0 24 24"><rect x="4" y="2.5" width="16" height="19" rx="2.5"/><path d="M11 18.5h2"/></symbol>
+    <symbol id="i-laptop" viewBox="0 0 24 24"><rect x="4.5" y="5" width="15" height="10" rx="1.5"/><path d="M2.5 19h19"/></symbol>
+    <symbol id="i-tv" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="12" rx="2"/><path d="M8 21h8"/><path d="m9 2 3 3 3-3"/></symbol>
+    <symbol id="i-gamepad" viewBox="0 0 24 24"><path d="M6.5 7h11a4.5 4.5 0 0 1 4.3 5.8l-1.2 4A2.5 2.5 0 0 1 16.4 18l-2.4-2h-4l-2.4 2a2.5 2.5 0 0 1-4.2-1.2l-1.2-4A4.5 4.5 0 0 1 6.5 7Z"/><path d="M8 10v3M6.5 11.5h3"/><path d="M15.5 11h.01M17.5 13h.01"/></symbol>
+    <symbol id="i-watch" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6l.7-3.5h4.6L15 6M9 18l.7 3.5h4.6L15 18"/><path d="M12 10v2l1.5 1"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="3"/><circle cx="12" cy="14" r="3.5"/><path d="M12 7h.01"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l1.5-2.5h7L17 8h3a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8Z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+    <symbol id="i-printer" viewBox="0 0 24 24"><path d="M7 8V3h10v5"/><rect x="3" y="8" width="18" height="9" rx="2"/><path d="M7 14h10v7H7z"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/></symbol>
+    <symbol id="i-dna" viewBox="0 0 24 24"><path d="M12 2v2M12 20v2"/><path d="M17 7a5 5 0 0 1-10 0"/><path d="M7 17a5 5 0 0 1 10 0"/></symbol>
+  </svg>
 
-  <!-- Toast Notification -->
-  <div id="toast" style="display:none; position:fixed; top:20px; right:20px; z-index:9999; background:#1e293b; color:#fff; padding:12px 20px; border-radius:8px; border:1px solid #3b82f6; box-shadow:0 10px 25px rgba(0,0,0,0.5); font-weight:600;"></div>
-
-  <!-- Login Container -->
-  <div id="login-container" class="login-wrap" style="display: none;">
-    <div class="login-card">
-      <div style="font-size: 2.2rem; margin-bottom: 12px;">🛡️</div>
-      <h2 style="margin-bottom: 6px; font-weight: 700;">Đăng Nhập Dashboard</h2>
-      <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 24px;">LAN Proxy Gateway & Zero-Leak Controller</p>
-      <form id="login-form">
-        <div class="form-group" style="text-align: left;">
-          <label for="password">Mật khẩu Dashboard</label>
-          <input type="password" id="password" required placeholder="Nhập mật khẩu quản trị..." autofocus>
-        </div>
-        <div id="login-error" style="display:none; color: var(--accent-red); font-size: 0.85rem; margin-bottom: 14px; text-align: left;"></div>
-        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 10px;">Đăng Nhập</button>
-      </form>
-    </div>
+  <!-- Boot splash: shown until the session check finishes -->
+  <div id="boot" class="boot" aria-hidden="true">
+    <div class="boot-mark"><svg class="ic"><use href="#i-shield"></use></svg></div>
   </div>
 
-  <!-- Main App Container -->
-  <div id="app-container" class="app-container" style="display: none;">
-    
-    <!-- Top Header -->
-    <header>
-      <div class="header-top">
-        <div class="brand">
-          <div style="font-size: 1.6rem;">🛡️</div>
-          <div>
-            <h1>MikroTik Proxy Gateway <span class="brand-badge">RB5009 / RouterOS 7.25</span></h1>
-            <p style="font-size: 0.8rem; color: var(--text-secondary);">Zero-Leak LAN Transparent Proxy & sing-box ARM64 Controller</p>
-          </div>
-        </div>
-        <div class="header-actions">
-          <span id="badge-mikrotik" class="badge badge-gray"><span class="badge-dot"></span> Đang kết nối RouterOS...</span>
-          <span id="badge-singbox" class="badge badge-gray"><span class="badge-dot"></span> Đang nạp sing-box...</span>
-          <button id="btn-logout" class="btn btn-sm btn-danger">Đăng xuất</button>
+  <!-- Login -->
+  <main id="login-view" class="login" hidden>
+    <div class="login-card">
+      <div class="login-lang">
+        <label class="lang-switch">
+          <span class="sr-only" data-i18n="lang.label">Language</span>
+          <svg class="ic ic-sm" aria-hidden="true"><use href="#i-globe"></use></svg>
+          <select class="lang-select" id="lang-select-login">
+            <option value="en">English</option>
+          </select>
+        </label>
+      </div>
+      <div class="login-brand">
+        <div class="brand-mark brand-mark-lg"><svg class="ic"><use href="#i-shield-check"></use></svg></div>
+        <div>
+          <h1 class="login-title">Proxy Gateway</h1>
+          <p class="login-sub" data-i18n="login.subtitle">Proxy routing and IP leak protection dashboard for your LAN</p>
         </div>
       </div>
+      <form id="login-form" class="stack" novalidate>
+        <div class="field">
+          <label for="login-password" data-i18n="login.password">Admin password</label>
+          <div class="input-group">
+            <input id="login-password" name="password" type="password" autocomplete="current-password" required spellcheck="false" autocapitalize="off">
+            <button type="button" class="input-addon" id="login-reveal" aria-label="Show password" data-i18n-attr="aria-label:reveal.showPassword" aria-pressed="false">
+              <svg class="ic"><use href="#i-eye"></use></svg>
+            </button>
+          </div>
+        </div>
+        <div id="login-error" class="inline-alert tone-bad" role="alert" hidden></div>
+        <button type="submit" class="btn btn-primary btn-lg btn-block" id="login-submit">
+          <span class="btn-label" data-i18n="login.submit">Sign in</span>
+        </button>
+      </form>
+      <p class="login-foot"><svg class="ic ic-sm"><use href="#i-lock"></use></svg> <span data-i18n="login.foot">Your session is encrypted and expires automatically.</span></p>
+      <p class="copyright"><span data-i18n="footer.copyright">&copy; 2026 Copyright</span> <strong>thuongtin</strong> &middot; <a href="https://www.facebook.com/hothuongtin" target="_blank" rel="noopener noreferrer">Facebook: hothuongtin</a> &middot; <a href="https://github.com/thuongtin" target="_blank" rel="noopener noreferrer">GitHub: thuongtin</a></p>
+    </div>
+  </main>
 
-      <!-- Quick Metrics Strip -->
-      <div class="metrics-strip">
-        <div class="metric-card">
-          <div class="metric-label">Thiết bị bảo vệ qua Proxy</div>
-          <div class="metric-val" id="metric-proxied-count" style="color: var(--accent-blue);">0</div>
+  <!-- Application shell -->
+  <div id="app-view" class="app" hidden>
+    <a class="skip-link" href="#main" data-i18n="app.skipLink">Skip to main content</a>
+
+    <header class="topbar">
+      <div class="topbar-brand">
+        <div class="brand-mark"><svg class="ic"><use href="#i-shield-check"></use></svg></div>
+        <div class="brand-text">
+          <span class="brand-name">Proxy Gateway</span>
+          <span class="brand-sub">MikroTik RouterOS</span>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">Gói tin Kill-Switch đã chặn</div>
-          <div class="metric-val" id="metric-ks-packets" style="color: var(--accent-green);">0</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Gói IPv6 phần cứng đã chặn</div>
-          <div class="metric-val" id="metric-v6-packets" style="color: var(--accent-purple);">0</div>
-        </div>
-        <div class="metric-card">
-          <div class="metric-label">Cấp độ bảo vệ Leak Guard</div>
-          <div class="metric-val" id="metric-overall-status" style="color: var(--accent-green); text-transform: uppercase;">ACTIVE</div>
-        </div>
+      </div>
+      <div class="topbar-status" aria-label="System status" data-i18n-attr="aria-label:topbar.status">
+        <span class="pill tone-idle" id="pill-router" title="RouterOS API connection" data-i18n-attr="title:chrome.router.title">
+          <span class="dot"></span><svg class="ic ic-sm"><use href="#i-router"></use></svg><span class="pill-text">RouterOS</span>
+        </span>
+        <span class="pill tone-idle" id="pill-singbox" title="sing-box process" data-i18n-attr="title:chrome.singbox.title">
+          <span class="dot"></span><svg class="ic ic-sm"><use href="#i-cpu"></use></svg><span class="pill-text">sing-box</span>
+        </span>
+      </div>
+      <div class="topbar-actions">
+        <span class="updated" id="updated-at" aria-live="off" data-i18n="common.loading">Loading...</span>
+        <button class="btn btn-icon btn-ghost" id="btn-refresh" type="button" aria-label="Refresh data" title="Refresh (R)" data-i18n-attr="aria-label:topbar.refresh;title:topbar.refreshTitle">
+          <svg class="ic"><use href="#i-refresh"></use></svg>
+        </button>
+        <label class="lang-switch lang-switch-top">
+          <span class="sr-only" data-i18n="lang.label">Language</span>
+          <svg class="ic ic-sm" aria-hidden="true"><use href="#i-globe"></use></svg>
+          <select class="lang-select" id="lang-select-top">
+            <option value="en">English</option>
+          </select>
+        </label>
+        <button class="btn btn-icon btn-ghost" id="btn-theme" type="button" aria-label="Switch to dark theme" title="Switch to dark theme" data-i18n-attr="aria-label:theme.toDark;title:theme.toDark">
+          <svg class="ic"><use href="#i-moon"></use></svg>
+        </button>
+        <button class="btn btn-ghost btn-logout" id="btn-logout" type="button">
+          <svg class="ic"><use href="#i-logout"></use></svg><span class="hide-sm" data-i18n="topbar.logout">Sign out</span>
+        </button>
       </div>
     </header>
 
-    <!-- Navigation Tabs -->
-    <nav class="nav-tabs">
-      <button class="tab-btn active" data-tab="tab-devices">📱 Thiết bị LAN (<span id="count-tab-devices">0</span>)</button>
-      <button class="tab-btn" data-tab="tab-proxies">⚡ Quản lý Proxy (<span id="count-tab-proxies">0</span>)</button>
-      <button class="tab-btn" data-tab="tab-leakguard">🛡️ Chống lộ IP & Hệ thống</button>
-    </nav>
-
-    <!-- TAB 1: THIẾT BỊ -->
-    <section id="tab-devices" class="tab-content">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">Danh Sách Thiết Bị Mạng LAN</h2>
-            <p style="font-size: 0.8rem; color: var(--text-secondary);">Quản lý gán Proxy, cố định DHCP tĩnh và kích hoạt chế độ Zero-Leak</p>
+    <div class="layout">
+      <nav class="sidebar" aria-label="Main navigation" data-i18n-attr="aria-label:nav.label">
+        <ul class="nav">
+          <li><a class="nav-item" href="#overview" data-view="overview"><svg class="ic"><use href="#i-grid"></use></svg><span class="nav-label"><span class="hide-sm" data-i18n="nav.overviewLong">Overview &amp; devices</span><span class="show-sm" data-i18n="nav.overview">Overview</span></span><span class="badge" id="nav-badge-overview" hidden></span></a></li>
+          <li><a class="nav-item" href="#proxies" data-view="proxies"><svg class="ic"><use href="#i-globe"></use></svg><span class="nav-label" data-i18n="nav.proxies">Proxies</span><span class="badge" id="nav-badge-proxies" hidden></span></a></li>
+          <li><a class="nav-item" href="#leakguard" data-view="leakguard"><svg class="ic"><use href="#i-shield"></use></svg><span class="nav-label" data-i18n="nav.leakguard">Leak protection</span><span class="badge" id="nav-badge-leakguard" hidden></span></a></li>
+          <li><a class="nav-item" href="#logs" data-view="logs"><svg class="ic"><use href="#i-file"></use></svg><span class="nav-label" data-i18n="nav.logs">Logs</span><span class="badge" id="nav-badge-logs" hidden></span></a></li>
+        </ul>
+        <div class="sidebar-card" id="sidebar-card">
+          <div class="sidebar-card-head">
+            <span class="dot dot-lg" id="sidebar-dot"></span>
+            <span class="sidebar-card-title" id="sidebar-title" data-i18n="common.checking">Checking...</span>
           </div>
-          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-            <input type="text" id="device-search" placeholder="🔍 Tìm theo IP, MAC, tên..." style="max-width: 220px;">
-            <select id="device-filter" style="max-width: 170px;">
-              <option value="all">Tất cả thiết bị</option>
-              <option value="proxied">Đang qua Proxy</option>
-              <option value="direct">Mạng trực tiếp</option>
-              <option value="online">Đang Online</option>
-            </select>
-            <button id="btn-refresh-devices" class="btn btn-sm">🔄 Làm mới</button>
+          <p class="sidebar-card-text" id="sidebar-text" data-i18n="sidebar.loading">Reading the status of the 6 IP leak protection layers.</p>
+        </div>
+      </nav>
+
+      <main id="main" class="main" tabindex="-1">
+
+        <!-- Overview -->
+        <section class="view" id="view-overview" data-view="overview" aria-labelledby="h-overview" hidden>
+          <div class="page-head">
+            <div>
+              <h1 id="h-overview" tabindex="-1" data-i18n="nav.overview">Overview</h1>
+              <p class="page-sub" data-i18n="overview.sub">Protection status and the network route of every device on the LAN.</p>
+            </div>
           </div>
-        </div>
 
-        <div class="table-responsive">
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 40px;">Trạng thái</th>
-                <th>Thiết bị</th>
-                <th>IP / MAC</th>
-                <th>Tuyến Proxy</th>
-                <th>Lá chắn bảo vệ (Leak Guard)</th>
-                <th style="text-align: right;">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody id="devices-tbody">
-              <tr><td colspan="6" style="text-align:center; color:var(--text-secondary); padding: 30px;">Đang tải danh sách thiết bị...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <!-- TAB 2: PROXY -->
-    <section id="tab-proxies" class="tab-content" style="display: none;">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">Danh Sách Proxy Đã Cấu Hình</h2>
-            <p style="font-size: 0.8rem; color: var(--text-secondary);">Hỗ trợ 7 giao thức: HTTP, HTTPS, SOCKS5, Shadowsocks, Trojan, VLESS Reality, VMess</p>
+          <div class="hero tone-idle" id="hero">
+            <div class="hero-icon"><svg class="ic"><use href="#i-shield-question"></use></svg></div>
+            <div class="hero-body">
+              <h2 class="hero-title" id="hero-title" data-i18n="hero.checking">Checking protection status</h2>
+              <p class="hero-text" id="hero-text" data-i18n="hero.loading">Reading data from the router and sing-box.</p>
+              <ul class="layer-chips" id="hero-layers" aria-label="Six IP leak protection layers" data-i18n-attr="aria-label:hero.layersAria"></ul>
+            </div>
+            <a class="btn btn-secondary hero-cta" href="#leakguard"><span data-i18n="hero.details">View details</span><svg class="ic ic-sm"><use href="#i-arrow-right"></use></svg></a>
           </div>
-          <div>
-            <button id="btn-open-add-proxy" class="btn btn-primary">+ Thêm Proxy Mới</button>
+
+          <div class="attention" id="attention" hidden>
+            <h2 class="section-title" data-i18n="attention.heading">Needs attention</h2>
+            <ul class="attention-list" id="attention-list"></ul>
           </div>
-        </div>
 
-        <div id="proxies-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px;">
-          <!-- Proxy cards injected here -->
-        </div>
-      </div>
-    </section>
+          <div class="metrics" id="metrics"></div>
 
-    <!-- TAB 3: LEAK GUARD & HỆ THỐNG -->
-    <section id="tab-leakguard" class="tab-content" style="display: none;">
-      <div class="panel">
-        <div class="panel-header">
-          <div>
-            <h2 class="panel-title">Hệ Thống Bảo Vệ 6 Tầng (Zero-Leak Guard)</h2>
-            <p style="font-size: 0.8rem; color: var(--text-secondary);">Đảm bảo chống rò rỉ tuyệt đối (Zero DNS Leak, IPv6 Drop, WebRTC STUN Kill, Fail-Closed)</p>
+          <div class="card" id="devices-card">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title" data-i18n="devices.title">Devices on the network</h2>
+                <p class="card-sub" id="devices-sub" data-i18n="devices.sub">Choose a route for each device: through a proxy or direct.</p>
+              </div>
+              <label class="search">
+                <svg class="ic ic-sm"><use href="#i-search"></use></svg>
+                <span class="sr-only" data-i18n="devices.search">Search devices</span>
+                <input type="search" id="device-search" placeholder="Search name, IP, MAC..." data-i18n-attr="placeholder:devices.searchPlaceholder" autocomplete="off" spellcheck="false">
+                <kbd class="hide-sm">/</kbd>
+              </label>
+            </div>
+            <div class="dev-list" id="devices-body" aria-live="polite" aria-busy="false"></div>
           </div>
-          <div style="display: flex; gap: 10px;">
-            <button id="btn-reconcile" class="btn btn-primary">⚡ Đồng bộ lại Router</button>
-            <button id="btn-flush-all" class="btn btn-danger">✂️ Cắt toàn bộ kết nối Proxy</button>
+        </section>
+
+        <!-- Proxies -->
+        <section class="view" id="view-proxies" data-view="proxies" aria-labelledby="h-proxies" hidden>
+          <div class="page-head">
+            <div>
+              <h1 id="h-proxies" tabindex="-1" data-i18n="nav.proxies">Proxies</h1>
+              <p class="page-sub" data-i18n="proxies.sub">Your proxy servers. Test them regularly to see their exit IP and latency.</p>
+            </div>
+            <div class="page-actions">
+              <button class="btn btn-secondary" id="btn-test-all" type="button"><svg class="ic"><use href="#i-activity"></use></svg><span class="btn-label" data-i18n="import.testAll">Test all</span></button>
+              <button class="btn btn-primary" id="btn-add-proxy" type="button"><svg class="ic"><use href="#i-plus"></use></svg><span class="btn-label" data-i18n="proxies.add">Add proxy</span></button>
+            </div>
           </div>
-        </div>
-
-        <div id="leakguard-layers" style="margin-bottom: 24px;">
-          <!-- 6 Layers injected here -->
-        </div>
-
-        <!-- Links to verify leaks -->
-        <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 24px;">
-          <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 10px; color: #60a5fa;">🔍 Kiểm tra rò rỉ IP thực tế trên thiết bị của bạn:</h3>
-          <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
-            <a href="https://ipleak.net" target="_blank" class="btn btn-sm">ipleak.net ↗</a>
-            <a href="https://browserleaks.com/dns" target="_blank" class="btn btn-sm">browserleaks.com/dns ↗</a>
-            <a href="https://browserleaks.com/webrtc" target="_blank" class="btn btn-sm">browserleaks.com/webrtc ↗</a>
-            <a href="https://test-ipv6.com" target="_blank" class="btn btn-sm">test-ipv6.com ↗</a>
+          <div class="summary-row" id="proxy-summary"></div>
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title" data-i18n="proxies.title">Proxy servers</h2>
+              <label class="search">
+                <svg class="ic ic-sm"><use href="#i-search"></use></svg>
+                <span class="sr-only" data-i18n="proxies.search">Search proxies</span>
+                <input type="search" id="proxy-search" placeholder="Search name, host, exit IP..." data-i18n-attr="placeholder:proxies.searchPlaceholder" autocomplete="off" spellcheck="false">
+              </label>
+            </div>
+            <div class="table-wrap">
+              <table class="table proxies-table">
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n="col.proxy">Proxy</th>
+                    <th scope="col" data-i18n="col.testResult">Test result</th>
+                    <th scope="col" data-i18n="col.latency">Latency</th>
+                    <th scope="col" data-i18n="col.users">Devices using it</th>
+                    <th scope="col" class="col-actions"><span class="sr-only" data-i18n="col.actions">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody id="proxies-body"></tbody>
+              </table>
+            </div>
           </div>
-          <p style="font-size: 0.8rem; color: var(--text-secondary);">
-            ⚠️ <strong>Lưu ý quan trọng cho điện thoại (iPhone/Android):</strong> Hãy tắt tính năng <em>"Wi-Fi Assist"</em> (Tự động chuyển 4G/5G khi mạng yếu) và tắt tính năng <em>"Private Wi-Fi Address" / Địa chỉ MAC ngẫu nhiên</em> khi kết nối Wi-Fi nhà để Router luôn nhận diện đúng thiết bị của bạn.
-          </p>
-        </div>
+        </section>
 
-        <!-- Sing-box System Logs -->
-        <div class="panel-header" style="margin-top: 10px;">
-          <h3 style="font-size: 1rem; font-weight: 600;">Nhật Ký sing-box Gần Đây (Sanitized Logs)</h3>
-          <button id="btn-refresh-logs" class="btn btn-sm">🔄 Làm mới log</button>
-        </div>
-        <div id="singbox-logs" class="log-box">Đang tải nhật ký sing-box...</div>
-      </div>
-    </section>
+        <!-- Leak guard -->
+        <section class="view" id="view-leakguard" data-view="leakguard" aria-labelledby="h-leakguard" hidden>
+          <div class="page-head">
+            <div>
+              <h1 id="h-leakguard" tabindex="-1" data-i18n="nav.leakguard">Leak protection</h1>
+              <p class="page-sub" data-i18n="lg.sub">Six protection layers run at the same time. If one layer fails, the others still block leaks.</p>
+            </div>
+            <div class="page-actions">
+              <button class="btn btn-secondary" id="btn-reconcile" type="button"><svg class="ic"><use href="#i-sync"></use></svg><span class="btn-label" data-i18n="lg.reconcile">Re-sync router</span></button>
+              <button class="btn btn-danger-soft" id="btn-flush-all" type="button"><svg class="ic"><use href="#i-scissors"></use></svg><span class="btn-label" data-i18n="lg.flushAll">Drop all connections</span></button>
+            </div>
+          </div>
+          <div class="metrics" id="lg-metrics"></div>
+          <div class="layers" id="lg-layers"></div>
+        </section>
 
+        <!-- Logs -->
+        <section class="view" id="view-logs" data-view="logs" aria-labelledby="h-logs" hidden>
+          <div class="page-head">
+            <div>
+              <h1 id="h-logs" tabindex="-1" data-i18n="nav.logs">Logs</h1>
+              <p class="page-sub" data-i18n="logs.pageSub">sing-box process status and the latest dashboard logs.</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h2 class="card-title" data-i18n="logs.singboxTitle">sing-box process</h2>
+              <span class="pill tone-idle" id="sb-pill"><span class="dot"></span><span class="pill-text" data-i18n="common.loadingShort">Loading</span></span>
+            </div>
+            <dl class="kv" id="sb-kv"></dl>
+            <div class="inline-alert tone-bad" id="sb-error" hidden></div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2 class="card-title" data-i18n="logs.title">System logs</h2>
+                <p class="card-sub" id="logs-sub" data-i18n="logs.sub">Refreshes every 15 seconds while this page is open.</p>
+              </div>
+              <div class="card-tools">
+                <label class="search">
+                  <svg class="ic ic-sm"><use href="#i-search"></use></svg>
+                  <span class="sr-only" data-i18n="logs.filter">Filter logs</span>
+                  <input type="search" id="log-filter" placeholder="Filter logs..." data-i18n-attr="placeholder:logs.filterPlaceholder" autocomplete="off" spellcheck="false">
+                </label>
+                <button class="btn btn-icon btn-secondary" id="btn-logs-refresh" type="button" aria-label="Reload logs" title="Reload logs" data-i18n-attr="aria-label:logs.reload;title:logs.reload"><svg class="ic"><use href="#i-refresh"></use></svg></button>
+                <button class="btn btn-icon btn-secondary" id="btn-logs-copy" type="button" aria-label="Copy logs" title="Copy logs" data-i18n-attr="aria-label:logs.copy;title:logs.copy"><svg class="ic"><use href="#i-copy"></use></svg></button>
+              </div>
+            </div>
+            <div class="log-box" id="log-box" tabindex="0" role="log" aria-label="Log content" data-i18n-attr="aria-label:logs.boxAria"></div>
+          </div>
+        </section>
+
+        <footer class="app-foot copyright">
+          <span><span data-i18n="footer.copyright">&copy; 2026 Copyright</span> <strong>thuongtin</strong></span>
+          <span class="foot-links">
+            <a href="https://www.facebook.com/hothuongtin" target="_blank" rel="noopener noreferrer">Facebook: hothuongtin</a>
+            <a href="https://github.com/thuongtin" target="_blank" rel="noopener noreferrer">GitHub: thuongtin</a>
+          </span>
+        </footer>
+      </main>
+    </div>
   </div>
 
-  <!-- MODAL: ADD / EDIT PROXY -->
-  <div id="modal-proxy" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3 id="modal-proxy-title" class="modal-title">Thêm Proxy Mới</h3>
-        <button id="btn-close-proxy-modal" class="modal-close">&times;</button>
-      </div>
+  <!-- Proxy add/edit dialog -->
+  <dialog class="dialog dialog-lg" id="dlg-proxy" aria-labelledby="dlg-proxy-title">
+    <div class="dialog-head">
+      <h2 class="dialog-title" id="dlg-proxy-title" data-i18n="proxyForm.titleAdd">Add proxy</h2>
+      <button class="btn btn-icon btn-ghost" type="button" data-close aria-label="Close" data-i18n-attr="aria-label:common.close"><svg class="ic"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="tabs" id="proxy-tabs" role="tablist" aria-label="How to add a proxy" data-i18n-attr="aria-label:proxyForm.tabsAria">
+      <button class="tab" type="button" role="tab" id="tab-paste" aria-controls="form-import" aria-selected="true"><svg class="ic ic-sm"><use href="#i-link"></use></svg><span data-i18n="proxyForm.tabPaste">Paste link</span></button>
+      <button class="tab" type="button" role="tab" id="tab-manual" aria-controls="form-proxy" aria-selected="false" tabindex="-1"><svg class="ic ic-sm"><use href="#i-sliders"></use></svg><span data-i18n="proxyForm.tabManual">Enter manually</span></button>
+    </div>
 
-      <div class="nav-tabs" style="margin-bottom: 16px;">
-        <button id="tab-btn-quick-import" class="tab-btn active" type="button">📋 Dán Nhanh URI</button>
-        <button id="tab-btn-manual-form" class="tab-btn" type="button">⚙️ Nhập Thủ Công</button>
-      </div>
-
-      <!-- Quick Import Mode -->
-      <div id="proxy-quick-import-wrap">
-        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 10px;">
-          Dán 1 hoặc nhiều link proxy (mỗi dòng 1 link): <code>socks5://</code>, <code>http://</code>, <code>https://</code>, <code>vless://</code>, <code>vmess://</code>, <code>ss://</code>, <code>trojan://</code> hoặc định dạng <code>host:port:user:pass</code>.
-        </p>
-        <div class="form-group">
-          <textarea id="import-text" rows="8" placeholder="socks5://user:pass@1.2.3.4:1080#MyProxy&#10;vless://uuid@host:443?security=reality&...&#10;192.168.1.50:8080:user:pass"></textarea>
+    <form id="form-import" class="dialog-body" role="tabpanel" aria-labelledby="tab-paste" novalidate>
+      <div id="panel-paste" class="stack">
+        <div class="field">
+          <label for="import-text" data-i18n="import.label">Links or a proxy list</label>
+          <textarea id="import-text" rows="7" spellcheck="false" autocomplete="off" placeholder="vless://...&#10;ss://...&#10;trojan://...&#10;socks5://user:pass@1.2.3.4:1080&#10;1.2.3.4:8080:user:pass"></textarea>
+          <p class="hint" data-i18n="import.hint">One proxy per line. Supports vless, vmess, trojan, ss, socks5, http(s) and the host:port:user:pass format. Lines starting with # are ignored.</p>
         </div>
-        <div class="form-group">
-          <label>Giao thức mặc định (cho định dạng host:port):</label>
-          <select id="import-default-proto">
+        <div class="field field-inline">
+          <label for="import-proto" data-i18n="import.defaultProto">Treat lines without a protocol as</label>
+          <select id="import-proto">
             <option value="http">HTTP</option>
-            <option value="socks5" selected>SOCKS5</option>
+            <option value="socks5">SOCKS5</option>
             <option value="https">HTTPS</option>
           </select>
         </div>
-        <button id="btn-submit-import" class="btn btn-primary" style="width: 100%;">Nhập Danh Sách Proxy</button>
+        <div id="import-result" hidden></div>
       </div>
+      <div class="dialog-foot">
+        <button class="btn btn-ghost" type="button" data-close data-i18n="common.cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="btn-import-submit"><span class="btn-label" data-i18n="import.submit">Import proxies</span></button>
+      </div>
+    </form>
 
-      <!-- Manual Input Mode -->
-      <form id="proxy-manual-form" style="display: none;">
-        <input type="hidden" id="p-id">
-        <div class="form-row">
-          <div class="form-group">
-            <label>Tên gợi nhớ:</label>
-            <input type="text" id="p-name" placeholder="Ví dụ: US Premium SOCKS5">
+    <form id="form-proxy" class="dialog-body" role="tabpanel" aria-labelledby="tab-manual" novalidate hidden>
+      <div id="panel-manual" class="stack">
+        <div class="grid-2">
+          <div class="field">
+            <label for="pf-name" data-i18n="proxyForm.name">Display name</label>
+            <input id="pf-name" name="name" maxlength="64" autocomplete="off" placeholder="For example: Singapore 01" data-i18n-attr="placeholder:proxyForm.namePlaceholder">
           </div>
-          <div class="form-group">
-            <label>Giao thức:</label>
-            <select id="p-protocol">
+          <div class="field">
+            <label for="pf-protocol" data-i18n="proxyForm.protocol">Protocol</label>
+            <select id="pf-protocol" name="protocol">
               <option value="socks5">SOCKS5</option>
               <option value="http">HTTP</option>
               <option value="https">HTTPS</option>
@@ -231,109 +372,256 @@
             </select>
           </div>
         </div>
-
-        <div class="form-row">
-          <div class="form-group">
-            <label>Máy chủ (Host / IP):</label>
-            <input type="text" id="p-host" required placeholder="1.2.3.4 hoặc proxy.domain.com">
+        <div class="grid-host">
+          <div class="field">
+            <label for="pf-host"><span data-i18n="proxyForm.host">Host or IP</span> <span class="req" aria-hidden="true">*</span></label>
+            <input id="pf-host" name="host" required autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="proxy.example.com">
+            <p class="field-error" id="pf-host-err" hidden></p>
           </div>
-          <div class="form-group">
-            <label>Cổng (Port):</label>
-            <input type="number" id="p-port" required min="1" max="65535" value="1080">
-          </div>
-        </div>
-
-        <!-- Auth fields (HTTP / SOCKS5) -->
-        <div id="p-group-auth" class="form-row">
-          <div class="form-group">
-            <label>Tên đăng nhập (Username):</label>
-            <input type="text" id="p-username" placeholder="Tùy chọn">
-          </div>
-          <div class="form-group">
-            <label>Mật khẩu (Password):</label>
-            <input type="password" id="p-password" placeholder="Tùy chọn">
+          <div class="field">
+            <label for="pf-port"><span data-i18n="proxyForm.port">Port</span> <span class="req" aria-hidden="true">*</span></label>
+            <input id="pf-port" name="port" type="number" inputmode="numeric" min="1" max="65535" required placeholder="1080">
+            <p class="field-error" id="pf-port-err" hidden></p>
           </div>
         </div>
 
-        <!-- Shadowsocks fields -->
-        <div id="p-group-ss" class="form-row" style="display: none;">
-          <div class="form-group">
-            <label>Phương thức mã hóa (Method):</label>
-            <select id="p-ss-method">
-              <option value="aes-256-gcm">aes-256-gcm</option>
+        <div class="grid-2" data-show="auth">
+          <div class="field">
+            <label for="pf-username" data-i18n="proxyForm.username">Username</label>
+            <input id="pf-username" name="username" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="Leave empty if not needed" data-i18n-attr="placeholder:proxyForm.usernamePlaceholder">
+          </div>
+          <div class="field" data-show="password">
+            <label for="pf-password"><span id="pf-password-label" data-i18n="proxyForm.password">Password</span> <span class="req" id="pf-password-req" aria-hidden="true" hidden>*</span></label>
+            <div class="input-group">
+              <input id="pf-password" name="password" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off">
+              <button type="button" class="input-addon" data-reveal="pf-password" aria-label="Show password" data-i18n-attr="aria-label:reveal.showPassword" aria-pressed="false"><svg class="ic"><use href="#i-eye"></use></svg></button>
+            </div>
+            <p class="hint" id="pf-password-hint" data-i18n="proxyForm.passwordStored" hidden>A password is saved. Leave empty to keep it.</p>
+            <p class="field-error" id="pf-password-err" hidden></p>
+          </div>
+        </div>
+
+        <div class="field" data-show="method">
+          <label for="pf-method" data-i18n="proxyForm.method">Encryption method</label>
+          <input id="pf-method" name="method" list="ss-methods" autocomplete="off" spellcheck="false" placeholder="aes-256-gcm">
+          <datalist id="ss-methods">
+            <option value="aes-128-gcm"></option>
+            <option value="aes-256-gcm"></option>
+            <option value="chacha20-ietf-poly1305"></option>
+            <option value="xchacha20-ietf-poly1305"></option>
+            <option value="2022-blake3-aes-128-gcm"></option>
+            <option value="2022-blake3-aes-256-gcm"></option>
+            <option value="2022-blake3-chacha20-poly1305"></option>
+          </datalist>
+        </div>
+
+        <div class="field" data-show="uuid">
+          <label for="pf-uuid">UUID <span class="req" aria-hidden="true">*</span></label>
+          <div class="input-group">
+            <input id="pf-uuid" name="uuid" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" class="mono" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+            <button type="button" class="input-addon" data-reveal="pf-uuid" aria-label="Show UUID" data-i18n-attr="aria-label:reveal.showUuid" aria-pressed="false"><svg class="ic"><use href="#i-eye"></use></svg></button>
+          </div>
+          <p class="hint" id="pf-uuid-hint" data-i18n="proxyForm.uuidStored" hidden>A UUID is saved. Leave empty to keep it.</p>
+          <p class="field-error" id="pf-uuid-err" hidden></p>
+        </div>
+
+        <div class="grid-2" data-show="vmess">
+          <div class="field">
+            <label for="pf-cipher" data-i18n="proxyForm.vmessCipher">VMess encryption</label>
+            <select id="pf-cipher" name="cipher">
+              <option value="auto">auto</option>
               <option value="aes-128-gcm">aes-128-gcm</option>
-              <option value="chacha20-ietf-poly1305">chacha20-ietf-poly1305</option>
-              <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
+              <option value="chacha20-poly1305">chacha20-poly1305</option>
+              <option value="none">none</option>
+              <option value="zero">zero</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>Mật khẩu SS:</label>
-            <input type="password" id="p-ss-pass" placeholder="Secret Key">
+          <div class="field">
+            <label for="pf-alterid">Alter ID</label>
+            <input id="pf-alterid" name="alterId" type="number" inputmode="numeric" min="0" max="65535" placeholder="0">
           </div>
         </div>
 
-        <!-- VLESS / VMess fields -->
-        <div id="p-group-uuid" class="form-group" style="display: none;">
-          <label>UUID:</label>
-          <input type="text" id="p-uuid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        <div class="field" data-show="vless">
+          <label for="pf-security" data-i18n="proxyForm.security">Transport security</label>
+          <select id="pf-security" name="security">
+            <option value="none" data-i18n="proxyForm.securityNone">None</option>
+            <option value="tls">TLS</option>
+            <option value="reality">REALITY</option>
+          </select>
         </div>
 
-        <!-- Reality / TLS fields -->
-        <div id="p-group-reality" style="display: none;">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Bảo mật (Security):</label>
-              <select id="p-security">
-                <option value="none">None</option>
-                <option value="tls">TLS</option>
-                <option value="reality">Reality</option>
+        <label class="switch" data-show="tlsToggle">
+          <input type="checkbox" id="pf-tls" name="tls">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-label"><span data-i18n="proxyForm.tls">Enable TLS</span><span class="switch-hint" data-i18n="proxyForm.tlsHint">Encrypts the connection to the proxy server</span></span>
+        </label>
+
+        <details class="advanced" id="pf-advanced">
+          <summary><svg class="ic ic-sm"><use href="#i-chevron-down"></use></svg><span data-i18n="proxyForm.advanced">Advanced options</span></summary>
+          <div class="stack">
+            <div class="grid-2" data-show="tlsOpts">
+              <div class="field">
+                <label for="pf-sni">SNI (server name)</label>
+                <input id="pf-sni" name="sni" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="Defaults to the host" data-i18n-attr="placeholder:proxyForm.sniPlaceholder">
+              </div>
+              <div class="field" data-show="fingerprint">
+                <label for="pf-fingerprint">uTLS fingerprint</label>
+                <select id="pf-fingerprint" name="fingerprint">
+                  <option value="" data-i18n="proxyForm.default">Default</option>
+                  <option value="chrome">chrome</option>
+                  <option value="firefox">firefox</option>
+                  <option value="safari">safari</option>
+                  <option value="ios">ios</option>
+                  <option value="edge">edge</option>
+                  <option value="android">android</option>
+                  <option value="random">random</option>
+                  <option value="randomized">randomized</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid-2" data-show="reality">
+              <div class="field">
+                <label for="pf-publickey">REALITY public key <span class="req" aria-hidden="true">*</span></label>
+                <input id="pf-publickey" name="publicKey" autocomplete="off" spellcheck="false" class="mono">
+                <p class="field-error" id="pf-publickey-err" hidden></p>
+              </div>
+              <div class="field">
+                <label for="pf-shortid">REALITY short ID</label>
+                <input id="pf-shortid" name="shortId" autocomplete="off" spellcheck="false" class="mono">
+              </div>
+            </div>
+            <div class="field" data-show="flow">
+              <label for="pf-flow">Flow</label>
+              <select id="pf-flow" name="flow">
+                <option value="" data-i18n="proxyForm.flowNone">None</option>
+                <option value="xtls-rprx-vision">xtls-rprx-vision</option>
               </select>
             </div>
-            <div class="form-group">
-              <label>SNI (Server Name):</label>
-              <input type="text" id="p-sni" placeholder="target.com">
+            <div class="field" data-show="transport">
+              <label for="pf-transport" data-i18n="proxyForm.transport">Transport type</label>
+              <select id="pf-transport" name="transport">
+                <option value="">TCP</option>
+                <option value="ws">WebSocket</option>
+                <option value="grpc">gRPC</option>
+              </select>
             </div>
+            <div class="grid-2" data-show="ws">
+              <div class="field">
+                <label for="pf-wspath">WebSocket path</label>
+                <input id="pf-wspath" name="wsPath" autocomplete="off" spellcheck="false" placeholder="/">
+              </div>
+              <div class="field">
+                <label for="pf-wshost">WebSocket Host header</label>
+                <input id="pf-wshost" name="wsHost" autocomplete="off" spellcheck="false">
+              </div>
+            </div>
+            <div class="field" data-show="grpc">
+              <label for="pf-grpc">gRPC service name</label>
+              <input id="pf-grpc" name="grpcServiceName" autocomplete="off" spellcheck="false">
+            </div>
+            <label class="switch" data-show="tlsOpts">
+              <input type="checkbox" id="pf-insecure" name="insecure">
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-label"><span data-i18n="proxyForm.insecure">Skip certificate verification</span><span class="switch-hint" data-i18n="proxyForm.insecureHint">Only enable this when the server uses a self-signed certificate. It is less secure.</span></span>
+            </label>
+            <label class="switch" data-show="udp">
+              <input type="checkbox" id="pf-udp" name="udp">
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-label"><span data-i18n="proxyForm.udp">Forward UDP</span><span class="switch-hint" data-i18n="proxyForm.udpHint">For games, voice calls and QUIC. Only enable this if the server supports it.</span></span>
+            </label>
           </div>
-          <div id="p-reality-fields" class="form-row" style="display: none;">
-            <div class="form-group">
-              <label>Public Key (pbk):</label>
-              <input type="text" id="p-pbk">
-            </div>
-            <div class="form-group">
-              <label>Short ID (sid):</label>
-              <input type="text" id="p-sid">
-            </div>
-          </div>
-        </div>
-
-        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
-          <input type="checkbox" id="p-udp" style="width: auto;">
-          <label for="p-udp" style="margin-bottom: 0;">Hỗ trợ chuyển tiếp UDP (Bỏ chọn sẽ kích hoạt bộ chặn STUN chống rò rỉ WebRTC)</label>
-        </div>
-
-        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">Lưu Cấu Hình Proxy</button>
-      </form>
-    </div>
-  </div>
-
-  <!-- MODAL: EDIT NICKNAME -->
-  <div id="modal-nickname" class="modal-overlay" style="display: none;">
-    <div class="modal-content" style="max-width: 400px;">
-      <div class="modal-header">
-        <h3 class="modal-title">Đổi Tên Gợi Nhớ</h3>
-        <button id="btn-close-nickname-modal" class="modal-close">&times;</button>
+        </details>
+        <div id="proxy-form-error" class="inline-alert tone-bad" role="alert" hidden></div>
       </div>
-      <form id="nickname-form">
-        <input type="hidden" id="nick-ip">
-        <div class="form-group">
-          <label id="nick-device-label">Thiết bị: </label>
-          <input type="text" id="nick-input" placeholder="Ví dụ: iPhone của Ethan, TV Phòng Khách...">
-        </div>
-        <button type="submit" class="btn btn-primary" style="width: 100%;">Lưu Tên</button>
-      </form>
-    </div>
-  </div>
+      <div class="dialog-foot">
+        <button class="btn btn-ghost" type="button" data-close data-i18n="common.cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="btn-proxy-submit"><span class="btn-label" data-i18n="proxyForm.submitAdd">Add proxy</span></button>
+      </div>
+    </form>
+  </dialog>
 
-  <script src="app.js"></script>
+  <!-- Route picker dialog -->
+  <dialog class="dialog dialog-route" id="dlg-route" aria-labelledby="dlg-route-title" aria-describedby="route-target">
+    <form id="form-route" novalidate>
+      <div class="dialog-head">
+        <div style="min-width:0">
+          <h2 class="dialog-title" id="dlg-route-title" data-i18n="route.title">How should this device reach the Internet?</h2>
+          <p class="dialog-sub" id="route-target"></p>
+        </div>
+        <button class="btn btn-icon btn-ghost" type="button" data-close aria-label="Close" data-i18n-attr="aria-label:common.close"><svg class="ic"><use href="#i-x"></use></svg></button>
+      </div>
+      <div class="dialog-body stack">
+        <div class="route-opts" id="route-options" role="radiogroup" aria-labelledby="dlg-route-title"></div>
+        <div id="route-note"></div>
+      </div>
+      <div class="dialog-foot">
+        <button class="btn btn-ghost" type="button" data-close data-i18n="common.cancel">Cancel</button>
+        <button class="btn btn-primary" type="submit" id="btn-route-apply"><span class="btn-label" data-i18n="route.apply">Apply</span></button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Device details dialog -->
+  <dialog class="dialog dialog-device" id="dlg-device" aria-labelledby="dlg-device-title">
+    <div class="dialog-head">
+      <div class="dd-head">
+        <div id="dd-avatar"></div>
+        <div style="min-width:0">
+          <h2 class="dialog-title" id="dlg-device-title"></h2>
+          <p class="dialog-sub" id="dd-sub"></p>
+        </div>
+      </div>
+      <button class="btn btn-icon btn-ghost" type="button" data-close aria-label="Close" data-i18n-attr="aria-label:common.close"><svg class="ic"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="dialog-body stack">
+      <section class="dd-section">
+        <h3 class="dd-label" data-i18n="dd.exit">Reaches the Internet as</h3>
+        <div class="dd-exit">
+          <div id="dd-exit"></div>
+          <button class="btn btn-secondary btn-sm" type="button" id="btn-device-route"><svg class="ic ic-sm"><use href="#i-route"></use></svg><span data-i18n="dd.changeRoute">Change route</span></button>
+        </div>
+      </section>
+
+      <form class="dd-section" id="form-nickname" novalidate>
+        <label class="dd-label" for="nick-input" data-i18n="nick.label">Friendly name</label>
+        <div class="dd-rename">
+          <input id="nick-input" maxlength="64" autocomplete="off" placeholder="For example: Lan's iPhone" data-i18n-attr="placeholder:nick.placeholder">
+          <button class="btn btn-secondary" type="submit" id="btn-nick-submit"><span class="btn-label" data-i18n="nick.submit">Save name</span></button>
+        </div>
+        <p class="hint" data-i18n="nick.hint">Leave empty to use the name the device reports (hostname).</p>
+      </form>
+
+      <section class="dd-section">
+        <h3 class="dd-label" data-i18n="dd.info">Details</h3>
+        <dl class="dd-info" id="dd-info"></dl>
+      </section>
+
+      <section class="dd-section dd-flush">
+        <h3 class="dd-label" data-i18n="dd.flush.title">Cut open connections</h3>
+        <p class="dd-text" id="dd-flush-text"></p>
+        <div><button class="btn btn-secondary btn-sm" type="button" id="btn-device-flush"><svg class="ic ic-sm"><use href="#i-scissors"></use></svg><span class="btn-label" data-i18n="dd.flush.button">Cut connections now</span></button></div>
+      </section>
+    </div>
+  </dialog>
+
+  <!-- Generic confirm dialog -->
+  <dialog class="dialog" id="dlg-confirm" aria-labelledby="dlg-confirm-title" aria-describedby="dlg-confirm-text">
+    <div class="dialog-head">
+      <div class="confirm-icon" id="dlg-confirm-icon"><svg class="ic"><use href="#i-alert"></use></svg></div>
+      <h2 class="dialog-title" id="dlg-confirm-title" data-i18n="confirm.title">Confirm</h2>
+    </div>
+    <div class="dialog-body">
+      <p class="dialog-text" id="dlg-confirm-text"></p>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn btn-ghost" type="button" id="dlg-confirm-cancel" data-i18n="common.cancel">Cancel</button>
+      <button class="btn btn-primary" type="button" id="dlg-confirm-ok" data-i18n="common.ok">OK</button>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-relevant="additions"></div>
+
+  <script src="app.js" defer></script>
 </body>
 </html>

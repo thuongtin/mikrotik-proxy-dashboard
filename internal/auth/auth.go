@@ -31,6 +31,29 @@ var (
 	ErrUnauthorized     = errors.New("unauthorized")
 )
 
+// LockoutError is returned by Login while a client is locked out. It matches
+// ErrLockedOut with errors.Is and carries the remaining lockout time.
+type LockoutError struct {
+	Remaining time.Duration
+}
+
+func (e *LockoutError) Error() string {
+	return fmt.Sprintf("%v (%d seconds remaining)", ErrLockedOut, e.RemainingSeconds())
+}
+
+// Unwrap lets errors.Is(err, ErrLockedOut) match.
+func (e *LockoutError) Unwrap() error { return ErrLockedOut }
+
+// RemainingSeconds returns the remaining lockout time in whole seconds,
+// rounded up so a client is never told 0 seconds while still locked out.
+func (e *LockoutError) RemainingSeconds() int {
+	secs := int((e.Remaining + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	return secs
+}
+
 // AuthManager handles authentication, session management, and rate limiting.
 type AuthManager struct {
 	passwordHash string
@@ -90,7 +113,7 @@ func (a *AuthManager) Login(password, clientIP string) (*http.Cookie, error) {
 	}
 
 	if locked, remaining := a.limiter.IsLockedOut(clientIP); locked {
-		return nil, fmt.Errorf("%w (%d seconds remaining)", ErrLockedOut, int(remaining.Seconds()))
+		return nil, &LockoutError{Remaining: remaining}
 	}
 
 	err := bcrypt.CompareHashAndPassword([]byte(a.passwordHash), []byte(password))
@@ -189,15 +212,10 @@ func (a *AuthManager) sign(payload string) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// GetClientIP extracts real client IP from RemoteAddr or Forwarded headers.
+// GetClientIP returns the address of the TCP peer. The dashboard is served
+// directly, with no trusted reverse proxy in front, so X-Forwarded-For and
+// X-Real-IP are attacker-controlled and must not feed the login rate limiter.
 func GetClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	if xrip := r.Header.Get("X-Real-IP"); xrip != "" {
-		return strings.TrimSpace(xrip)
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host

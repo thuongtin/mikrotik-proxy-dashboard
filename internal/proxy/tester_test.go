@@ -66,10 +66,10 @@ func TestEphemeralProxyTester(t *testing.T) {
 
 func TestEphemeralProxyTesterWithOptionsAndSingboxCheck(t *testing.T) {
 	testCases := []struct {
-		name        string
-		opts        TestOptions
-		expectDNS   bool
-		expectVeth  bool
+		name       string
+		opts       TestOptions
+		expectDNS  bool
+		expectVeth bool
 	}{
 		{
 			name: "Both VethIF and ContainerGW set",

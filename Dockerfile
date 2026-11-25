@@ -1,7 +1,16 @@
-# Stage 1: Build Go static binary and compress binaries
-FROM golang:alpine AS builder
+# Every base image is pinned to a version AND a digest so a rebuild cannot
+# silently pick up different code. To upgrade: change the tag, then refresh the
+# digest with `docker buildx imagetools inspect <image>:<tag>` and rerun
+# scripts/build-arm64-tar.sh (it runs vet, tests and govulncheck first).
+ARG GO_IMAGE=golang:1.27.4-alpine3.24@sha256:70bd7ddea8b6cbe5d6943cde279d6b67feb10cc924fb9100d1d8757c1575b280
+ARG SINGBOX_IMAGE=ghcr.io/sagernet/sing-box:v1.14.4@sha256:0788ffbddab2c68a99a2dd4780bbc50902f159af6f589df3ee74a8389d278279
+ARG RUNTIME_IMAGE=alpine:3.21.10@sha256:bc21487101ae47172509130ee1092cc273a831968d64b617776d1f69c81e42ab
 
-RUN apk add --no-cache upx
+# Official sing-box release image, used only as a source for the binary
+FROM ${SINGBOX_IMAGE} AS singbox
+
+# Source tree with dependencies, shared by the check and build stages
+FROM ${GO_IMAGE} AS source
 
 WORKDIR /src
 
@@ -9,24 +18,47 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code and build for linux/arm64
 COPY . .
+
+# Check stage: vet, tests (they call the pinned sing-box binary) and a
+# vulnerability scan with the same toolchain that builds the release binary.
+# Not part of the final image; build it with `--target check`.
+FROM source AS check
+ARG GOVULNCHECK_VERSION=v1.10.0
+ARG SKIP_VULNCHECK=0
+COPY --from=singbox /usr/local/bin/sing-box /usr/local/bin/sing-box
+RUN CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...
+RUN if [ "$SKIP_VULNCHECK" = "1" ]; then \
+        echo "WARNING: SKIP_VULNCHECK=1, govulncheck skipped" >&2; \
+    else \
+        go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...; \
+    fi
+
+# Stage 1: Build Go static binary and compress binaries
+FROM source AS builder
+
+RUN apk add --no-cache upx
+
+# Build for linux/arm64
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /app/proxy-dash .
 RUN upx -9 /app/proxy-dash || true
 
 # Copy and compress official sing-box binary
-COPY --from=ghcr.io/sagernet/sing-box:latest /usr/local/bin/sing-box /app/sing-box
+COPY --from=singbox /usr/local/bin/sing-box /app/sing-box
 RUN upx -9 /app/sing-box || true
 
 # Stage 2: Minimal ARM64 runtime image
-FROM alpine:3.21
+FROM ${RUNTIME_IMAGE}
 
-# Install runtime networking utilities and certificates
+# Install runtime networking utilities and certificates.
+# iptables (nft backend) and iptables-legacy are both needed: entrypoint.sh
+# tries each one for the forward guard, depending on what the kernel offers.
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
     iproute2 \
     iptables \
+    iptables-legacy \
     && rm -rf /var/cache/apk/*
 
 # Copy compressed binaries
@@ -41,7 +73,8 @@ ENV LISTEN_ADDR=":8080" \
     DATA_DIR="/data" \
     LAN_CIDR="10.88.88.0/24" \
     CONTAINER_GW="10.10.10.1" \
-    SINGBOX_PATH="/usr/local/bin/sing-box"
+    SINGBOX_PATH="/usr/local/bin/sing-box" \
+    FORWARD_GUARD="auto"
 
 VOLUME ["/data"]
 EXPOSE 8080 53/udp 53/tcp

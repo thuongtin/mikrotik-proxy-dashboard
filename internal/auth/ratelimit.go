@@ -7,11 +7,11 @@ import (
 
 // RateLimiter tracks failed login attempts per client IP.
 type RateLimiter struct {
-	mu           sync.Mutex
-	attempts     map[string][]time.Time
-	lockouts     map[string]time.Time
-	maxAttempts  int
-	window       time.Duration
+	mu              sync.Mutex
+	attempts        map[string][]time.Time
+	lockouts        map[string]time.Time
+	maxAttempts     int
+	window          time.Duration
 	lockoutDuration time.Duration
 }
 

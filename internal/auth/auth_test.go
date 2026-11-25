@@ -98,3 +98,50 @@ func TestRateLimiterLockoutExpiry(t *testing.T) {
 		t.Fatalf("lockout should have expired")
 	}
 }
+
+func TestGetClientIPIgnoresForwardedHeaders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+	req.RemoteAddr = "10.88.88.77:51234"
+	req.Header.Set("X-Forwarded-For", "1.2.3.4, 5.6.7.8")
+	req.Header.Set("X-Real-IP", "9.9.9.9")
+
+	if got := GetClientIP(req); got != "10.88.88.77" {
+		t.Fatalf("expected TCP peer 10.88.88.77, got %q", got)
+	}
+
+	req.RemoteAddr = "[fd00::1234]:443"
+	if got := GetClientIP(req); got != "fd00::1234" {
+		t.Fatalf("expected IPv6 peer fd00::1234, got %q", got)
+	}
+}
+
+func TestRateLimitCannotBeBypassedWithSpoofedHeaders(t *testing.T) {
+	tempDir := t.TempDir()
+	hash, err := HashPassword("SecretPass123!")
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+	mgr, err := NewAuthManager(tempDir, hash)
+	if err != nil {
+		t.Fatalf("failed to create AuthManager: %v", err)
+	}
+
+	// Every attempt claims a different forwarded address; all of them must be
+	// counted against the one real peer.
+	lockedOut := false
+	for i := 0; i < 50; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login", nil)
+		req.RemoteAddr = "10.88.88.77:40000"
+		req.Header.Set("X-Forwarded-For", "198.51.100."+string(rune('0'+i%10)))
+		if _, err := mgr.Login("wrong-password", GetClientIP(req)); err == nil {
+			t.Fatalf("login with a wrong password must fail")
+		}
+		if locked, _ := mgr.limiter.IsLockedOut("10.88.88.77"); locked {
+			lockedOut = true
+			break
+		}
+	}
+	if !lockedOut {
+		t.Fatalf("expected the real peer to be locked out despite spoofed headers")
+	}
+}

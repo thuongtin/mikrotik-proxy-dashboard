@@ -7,18 +7,25 @@ import (
 
 // Config holds runtime configuration loaded from environment variables.
 type Config struct {
-	ListenAddr           string
-	DataDir              string
-	LanCIDR              string
-	ContainerGW          string
-	VethIF               string
-	ExcludeCIDRs         []string
-	SingboxPath          string
+	ListenAddr            string
+	DataDir               string
+	LanCIDR               string
+	ContainerGW           string
+	VethIF                string
+	ExcludeCIDRs          []string
+	SingboxPath           string
 	DashboardPasswordHash string
-	MikroTikURL          string
-	MikroTikUser         string
-	MikroTikPass         string
-	MikroTikInsecureTLS  bool
+	MikroTikURL           string
+	MikroTikUser          string
+	MikroTikPass          string
+	MikroTikInsecureTLS   bool
+	// MikroTikCAFile is a PEM file with the CA (or the self-signed certificate)
+	// that signed the RouterOS www-ssl certificate.
+	MikroTikCAFile string
+	// ForwardGuardStatus is what entrypoint.sh reported about the in-container
+	// FORWARD drop rules: "active", "unavailable", "off", or "" when the
+	// program was not started through the entrypoint.
+	ForwardGuardStatus string
 }
 
 // LoadFromEnv loads configuration from environment variables with defaults.
@@ -36,23 +43,39 @@ func LoadFromEnv() *Config {
 	mikrotikURL := getEnv("MIKROTIK_URL", "https://10.88.88.1")
 	mikrotikUser := getEnv("MIKROTIK_USER", "admin")
 	mikrotikPass := getEnv("MIKROTIK_PASS", "")
-	insecureTLS := getEnv("MIKROTIK_INSECURE_TLS", "true") == "true"
+	// Certificate verification is on unless explicitly switched off: the
+	// RouterOS credentials travel over this connection.
+	insecureTLS := strings.EqualFold(strings.TrimSpace(getEnv("MIKROTIK_INSECURE_TLS", "false")), "true")
+	caFile := strings.TrimSpace(getEnv("MIKROTIK_CA_FILE", ""))
 
 	passwordHash := getEnv("DASHBOARD_PASSWORD_HASH", "")
 
 	return &Config{
-		ListenAddr:           listenAddr,
-		DataDir:              dataDir,
-		LanCIDR:              lanCIDR,
-		ContainerGW:          containerGW,
-		VethIF:               vethIF,
-		ExcludeCIDRs:         excludeCIDRs,
-		SingboxPath:          singboxPath,
+		ListenAddr:            listenAddr,
+		DataDir:               dataDir,
+		LanCIDR:               lanCIDR,
+		ContainerGW:           containerGW,
+		VethIF:                vethIF,
+		ExcludeCIDRs:          excludeCIDRs,
+		SingboxPath:           singboxPath,
 		DashboardPasswordHash: passwordHash,
-		MikroTikURL:          mikrotikURL,
-		MikroTikUser:         mikrotikUser,
-		MikroTikPass:         mikrotikPass,
-		MikroTikInsecureTLS:  insecureTLS,
+		MikroTikURL:           mikrotikURL,
+		MikroTikUser:          mikrotikUser,
+		MikroTikPass:          mikrotikPass,
+		MikroTikInsecureTLS:   insecureTLS,
+		MikroTikCAFile:        caFile,
+		ForwardGuardStatus:    parseForwardGuardStatus(os.Getenv("FORWARD_GUARD_STATUS")),
+	}
+}
+
+// parseForwardGuardStatus accepts only the values entrypoint.sh exports.
+// Anything else counts as "not reported" so a typo can never read as active.
+func parseForwardGuardStatus(raw string) string {
+	switch v := strings.ToLower(strings.TrimSpace(raw)); v {
+	case "active", "unavailable", "off":
+		return v
+	default:
+		return ""
 	}
 }
 

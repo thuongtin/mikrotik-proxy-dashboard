@@ -22,12 +22,12 @@ var (
 
 // SupervisorStatus reports sing-box engine status.
 type SupervisorStatus struct {
-	Running     bool      `json:"running"`
-	PID         int       `json:"pid"`
-	Version     string    `json:"version"`
-	LastReload  time.Time `json:"lastReload"`
-	LastError   string    `json:"lastError,omitempty"`
-	ConfigPath  string    `json:"configPath"`
+	Running    bool      `json:"running"`
+	PID        int       `json:"pid"`
+	Version    string    `json:"version"`
+	LastReload time.Time `json:"lastReload"`
+	LastError  string    `json:"lastError,omitempty"`
+	ConfigPath string    `json:"configPath"`
 }
 
 // Supervisor manages the sing-box daemon lifecycle and sanitized log ring-buffer.

@@ -4,14 +4,53 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
+
+const (
+	// maxResponseBytes caps how much of a RouterOS response is read. A large
+	// connection table is a few megabytes; anything beyond this is refused.
+	maxResponseBytes = 32 << 20
+	// maxErrorBodyChars caps how much of a response body is echoed in errors.
+	maxErrorBodyChars = 300
+)
+
+// Options controls how the client verifies the RouterOS TLS certificate.
+type Options struct {
+	// InsecureTLS disables certificate verification. Only for lab use: anyone
+	// on the path can then read the router credentials.
+	InsecureTLS bool
+	// CAFile is a PEM file with the certificate (or its CA) that RouterOS
+	// presents on www-ssl. When empty the system trust store is used.
+	CAFile string
+}
+
+// APIError is a non-2xx answer from the RouterOS REST API.
+type APIError struct {
+	Method string
+	Path   string
+	Status int
+	Body   string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("mikrotik API error on %s %s (status %d): %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+// IsNotFound reports whether err is a RouterOS "no such item" answer.
+func IsNotFound(err error) bool {
+	var apiErr *APIError
+	return errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound
+}
 
 // Client is a REST API client for MikroTik RouterOS v7.
 type Client struct {
@@ -22,16 +61,31 @@ type Client struct {
 }
 
 // NewClient initializes a MikroTik REST client.
-func NewClient(rawURL, username, password string, insecureTLS bool) (*Client, error) {
+func NewClient(rawURL, username, password string, opts Options) (*Client, error) {
 	baseURL := strings.TrimRight(rawURL, "/")
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		baseURL = "https://" + baseURL
 	}
 
+	tlsCfg := &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: opts.InsecureTLS, // #nosec G402 -- explicit opt-in via MIKROTIK_INSECURE_TLS
+	}
+
+	if opts.CAFile != "" {
+		pemData, err := os.ReadFile(opts.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read MikroTik CA file %s: %w", opts.CAFile, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pemData) {
+			return nil, fmt.Errorf("MikroTik CA file %s contains no PEM certificate", opts.CAFile)
+		}
+		tlsCfg.RootCAs = pool
+	}
+
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: insecureTLS,
-		},
+		TLSClientConfig:       tlsCfg,
 		ResponseHeaderTimeout: 10 * time.Second,
 	}
 
@@ -75,22 +129,40 @@ func (c *Client) Do(ctx context.Context, method, path string, body interface{}, 
 	}
 	defer resp.Body.Close()
 
-	respData, err := io.ReadAll(resp.Body)
+	respData, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return fmt.Errorf("failed to read response of %s %s: %w", method, path, err)
+	}
+	if len(respData) > maxResponseBytes {
+		return fmt.Errorf("mikrotik response of %s %s exceeds %d bytes", method, path, maxResponseBytes)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("mikrotik API error (status %d): %s", resp.StatusCode, string(respData))
+		return &APIError{Method: method, Path: path, Status: resp.StatusCode, Body: truncateBody(respData)}
 	}
 
-	if out != nil && len(respData) > 0 {
+	if out != nil && len(bytes.TrimSpace(respData)) > 0 {
 		if err := json.Unmarshal(respData, out); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w (raw: %s)", err, string(respData))
+			return fmt.Errorf("failed to decode response of %s %s: %w", method, path, err)
 		}
 	}
 
 	return nil
+}
+
+// truncateBody keeps error messages short and free of control characters.
+func truncateBody(data []byte) string {
+	s := strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(string(data), "?"))
+	s = strings.TrimSpace(s)
+	if runes := []rune(s); len(runes) > maxErrorBodyChars {
+		s = string(runes[:maxErrorBodyChars]) + "..."
+	}
+	return s
 }
 
 // BuildQueryParam constructs RouterOS REST filter queries.

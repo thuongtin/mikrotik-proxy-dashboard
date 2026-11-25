@@ -1,0 +1,9 @@
+# Keep secrets, build output and VCS data out of the build context.
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+dist
+docs
+*.md

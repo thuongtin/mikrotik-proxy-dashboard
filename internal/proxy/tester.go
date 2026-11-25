@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -20,8 +21,10 @@ var (
 	sensitiveRegex = regexp.MustCompile(`(?i)(password|pass|secret|uuid|token|pbk|sid)[=:\s"]+([^\s,"]+)`)
 )
 
+// sanitizeError masks credentials and strips control characters from an error
+// message. Part of the text can come from the proxy under test.
 func sanitizeError(errStr string) string {
-	return sensitiveRegex.ReplaceAllString(errStr, "$1=***")
+	return cleanText(sensitiveRegex.ReplaceAllString(errStr, "$1=***"), maxErrorRunes, false)
 }
 
 type ipAPIResponse struct {
@@ -281,22 +284,28 @@ func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*Tes
 	if err == nil && resp.StatusCode == http.StatusOK {
 		defer resp.Body.Close()
 		var apiResp ipAPIResponse
-		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err == nil && apiResp.Status == "success" {
+		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, maxLookupBody)).Decode(&apiResp)
+		exitIP, validIP := sanitizeExitIP(apiResp.Query)
+		switch {
+		case decodeErr != nil:
+			lastErr = "invalid response from ip-api"
+		case apiResp.Status != "success":
+			lastErr = fmt.Sprintf("ip-api returned status %s", apiResp.Status)
+		case !validIP:
+			lastErr = "ip-api returned an invalid exit IP"
+		default:
 			res := &TestResult{
 				Status:      "ok",
-				ExitIP:      apiResp.Query,
-				Country:     apiResp.Country,
-				CountryCode: apiResp.CountryCode,
-				City:        apiResp.City,
-				ISP:         apiResp.ISP,
+				ExitIP:      exitIP,
+				Country:     sanitizeLabel(apiResp.Country),
+				CountryCode: sanitizeCountryCode(apiResp.CountryCode),
+				City:        sanitizeLabel(apiResp.City),
+				ISP:         sanitizeLabel(apiResp.ISP),
 				LatencyMs:   latency,
 				TestedAt:    time.Now(),
 			}
 			p.LastTest = res
 			return res, nil
-		}
-		if apiResp.Status != "success" && apiResp.Status != "" {
-			lastErr = fmt.Sprintf("ip-api returned status %s", apiResp.Status)
 		}
 	} else if err != nil {
 		lastErr = err.Error()
@@ -308,6 +317,8 @@ func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*Tes
 	}
 
 	// Fallback to api.ipify.org
+	primaryErr := lastErr
+	lastErr = ""
 	start = time.Now()
 	req2, err := http.NewRequestWithContext(runCtx, http.MethodGet, "https://api.ipify.org?format=json", nil)
 	if err == nil {
@@ -316,10 +327,11 @@ func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*Tes
 		if err2 == nil && resp2.StatusCode == http.StatusOK {
 			defer resp2.Body.Close()
 			var ipify ipifyResponse
-			if err := json.NewDecoder(resp2.Body).Decode(&ipify); err == nil && ipify.IP != "" {
+			decodeErr := json.NewDecoder(io.LimitReader(resp2.Body, maxLookupBody)).Decode(&ipify)
+			if exitIP, validIP := sanitizeExitIP(ipify.IP); decodeErr == nil && validIP {
 				res := &TestResult{
 					Status:    "ok",
-					ExitIP:    ipify.IP,
+					ExitIP:    exitIP,
 					LatencyMs: latency,
 					TestedAt:  time.Now(),
 				}
@@ -341,6 +353,10 @@ func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*Tes
 
 	if lastErr == "" {
 		lastErr = "connection failed or timed out"
+	}
+	if primaryErr != "" {
+		// Keep the first lookup's failure so the reason is not hidden by the fallback's.
+		lastErr = primaryErr + "; " + lastErr
 	}
 
 	res := &TestResult{

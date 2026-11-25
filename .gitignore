@@ -17,3 +17,9 @@ data/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Editors and local tooling
+.idea/
+.vscode/
+coverage.out
+*.test

@@ -2,14 +2,22 @@ package state
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/proxy"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/proxy"
 )
+
+// ErrProxyInUse is returned when a proxy still has devices assigned to it.
+var ErrProxyInUse = errors.New("proxy is assigned to devices")
+
+// ErrProxyNotFound is returned when a proxy ID does not exist.
+var ErrProxyNotFound = errors.New("proxy not found")
 
 // DeviceConfig holds persistent settings for a LAN device.
 type DeviceConfig struct {
@@ -122,21 +130,56 @@ func (s *State) SaveProxy(p *proxy.Proxy) error {
 	return s.saveLocked()
 }
 
-// DeleteProxy removes a proxy and clears any assignments referencing it.
+// DeleteProxy removes a proxy. It refuses with ErrProxyInUse while any device
+// is still assigned to it: silently clearing the assignment would leave the
+// device in the router's PROXY_DEVICES list with no outbound to carry it.
 func (s *State) DeleteProxy(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.Proxies, id)
-
-	// Clear assignments pointing to this proxy
 	for _, d := range s.Devices {
 		if d.ProxyID == id {
-			d.ProxyID = ""
-			d.AssignedAt = time.Time{}
+			return ErrProxyInUse
 		}
 	}
 
+	delete(s.Proxies, id)
+	return s.saveLocked()
+}
+
+// DevicesUsingProxy returns copies of the devices assigned to a proxy, sorted by IP.
+func (s *State) DevicesUsingProxy(id string) []*DeviceConfig {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var result []*DeviceConfig
+	for _, d := range s.Devices {
+		if d.ProxyID == id {
+			cp := *d
+			result = append(result, &cp)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].IP < result[j].IP })
+	return result
+}
+
+// SetProxyTestResult stores the latest test result of an existing proxy.
+// Unlike SaveProxy it never creates the proxy, so a test that finishes after
+// the proxy was deleted cannot bring it back.
+func (s *State) SetProxyTestResult(id string, res *proxy.TestResult) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	p, ok := s.Proxies[id]
+	if !ok {
+		return ErrProxyNotFound
+	}
+	if res == nil {
+		p.LastTest = nil
+	} else {
+		cp := *res
+		p.LastTest = &cp
+	}
 	return s.saveLocked()
 }
 
@@ -206,6 +249,26 @@ func (s *State) RemoveDeviceAssignment(ip string) error {
 		return s.saveLocked()
 	}
 	return nil
+}
+
+// RestoreDevice puts back the saved settings of a device exactly as prev
+// holds them. A nil prev means the device had no saved settings, so its entry
+// is removed.
+func (s *State) RestoreDevice(ip string, prev *DeviceConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if prev == nil {
+		if _, ok := s.Devices[ip]; !ok {
+			return nil
+		}
+		delete(s.Devices, ip)
+		return s.saveLocked()
+	}
+	cp := *prev
+	cp.IP = ip
+	s.Devices[ip] = &cp
+	return s.saveLocked()
 }
 
 // SetDeviceNickname updates only the nickname.

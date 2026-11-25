@@ -47,14 +47,14 @@ type TestResult struct {
 
 // Proxy defines configuration for a proxy outbound.
 type Proxy struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Protocol  string    `json:"protocol"` // http, https, socks5, shadowsocks, trojan, vless, vmess
-	Host      string    `json:"host"`
-	Port      int       `json:"port"`
-	Username  string    `json:"username,omitempty"`
-	Password  string    `json:"password,omitempty"`
-	UDP       bool      `json:"udp"` // UDP relay supported (defaults to false for http/https)
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"` // http, https, socks5, shadowsocks, trojan, vless, vmess
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+	UDP      bool   `json:"udp"` // UDP relay supported (defaults to false for http/https)
 
 	// Shadowsocks
 	Method string `json:"method,omitempty"`

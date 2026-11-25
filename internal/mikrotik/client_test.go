@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/proxy"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/proxy"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/state"
 )
 
 type mockRouterState struct {
@@ -26,7 +26,21 @@ type mockRouterState struct {
 	madeStatic  []string
 	deletedURLs []string
 	adds        []map[string]interface{}
+	patches     []string
 	moves       []map[string]string
+	v4Filters   []map[string]interface{}
+	natRules    []map[string]interface{}
+	routeRules  []map[string]interface{}
+	mangleRules []map[string]interface{}
+	tables      []map[string]interface{}
+	// failStatus forces an HTTP error status for a REST path (without /rest).
+	failStatus map[string]int
+}
+
+func (m *mockRouterState) set(fn func(m *mockRouterState)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	fn(m)
 }
 
 func setupMockRouter() (*mockRouterState, *httptest.Server) {
@@ -92,6 +106,40 @@ func setupMockRouter() (*mockRouterState, *httptest.Server) {
 				"mac-address": "00:11:22:33:44:50",
 			},
 		},
+		v4Filters: []map[string]interface{}{
+			{".id": "*28", "chain": "forward", "action": "passthrough", "dynamic": "true", "comment": "special dummy rule to show fasttrack counters"},
+			{
+				".id": "*2A", "chain": "forward", "action": "drop", "comment": "proxy-dash-killswitch",
+				"src-address-list": "PROXY_DEVICES", "out-interface-list": "WAN",
+				"disabled": "false", "dynamic": "false", "invalid": "false", "packets": "120", "bytes": "8500",
+			},
+			{
+				".id": "*5", "chain": "forward", "action": "fasttrack-connection", "connection-state": "established,related",
+				"src-address-list": "!PROXY_DEVICES", "dst-address-list": "!PROXY_DEVICES",
+			},
+			{".id": "*6", "chain": "forward", "action": "accept", "connection-state": "established,related,untracked"},
+		},
+		natRules: []map[string]interface{}{
+			{
+				".id": "*16", "chain": "dstnat", "action": "dst-nat", "protocol": "udp", "dst-port": "53",
+				"src-address-list": "PROXY_DEVICES", "to-addresses": "10.10.10.16", "to-ports": "53", "comment": "proxy-dash:dns-hijack-udp",
+			},
+			{
+				".id": "*17", "chain": "dstnat", "action": "dst-nat", "protocol": "tcp", "dst-port": "53",
+				"src-address-list": "PROXY_DEVICES", "to-addresses": "10.10.10.16", "to-ports": "53", "comment": "proxy-dash:dns-hijack-tcp",
+			},
+		},
+		routeRules: []map[string]interface{}{
+			{".id": "*1", "action": "lookup-only-in-table", "routing-mark": "via-proxy", "table": "via-proxy", "disabled": "false"},
+		},
+		mangleRules: []map[string]interface{}{
+			{
+				".id": "*11", "chain": "prerouting", "action": "mark-routing", "new-routing-mark": "via-proxy",
+				"src-address-list": "PROXY_DEVICES", "in-interface": "BridgeLAN", "disabled": "false",
+			},
+		},
+		tables:     []map[string]interface{}{{".id": "*400", "name": "via-proxy", "fib": ""}},
+		failStatus: map[string]int{},
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +147,12 @@ func setupMockRouter() (*mockRouterState, *httptest.Server) {
 		defer mock.mu.Unlock()
 
 		path := r.URL.Path
+
+		if code, ok := mock.failStatus[strings.TrimPrefix(path, "/rest")]; ok {
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"error":` + fmt.Sprint(code) + `,"message":"forced failure"}`))
+			return
+		}
 
 		switch {
 		case r.Method == "GET" && path == "/rest/ip/dhcp-server/lease":
@@ -108,6 +162,11 @@ func setupMockRouter() (*mockRouterState, *httptest.Server) {
 			var body map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			mock.madeStatic = append(mock.madeStatic, body[".id"])
+			for _, l := range mock.leases {
+				if l[".id"] == body[".id"] {
+					l["dynamic"] = "false"
+				}
+			}
 			w.WriteHeader(http.StatusOK)
 
 		case r.Method == "GET" && path == "/rest/ip/arp":
@@ -125,10 +184,51 @@ func setupMockRouter() (*mockRouterState, *httptest.Server) {
 
 		case r.Method == "DELETE" && strings.HasPrefix(path, "/rest/ip/firewall/address-list/"):
 			mock.deletedURLs = append(mock.deletedURLs, path)
+			id := strings.TrimPrefix(path, "/rest/ip/firewall/address-list/")
+			var kept []map[string]interface{}
+			for _, e := range mock.addrLists {
+				if e[".id"] != id {
+					kept = append(kept, e)
+				}
+			}
+			mock.addrLists = kept
+			w.WriteHeader(http.StatusOK)
+
+		case r.Method == "PATCH" && strings.HasPrefix(path, "/rest/ip/firewall/address-list/"):
+			mock.patches = append(mock.patches, path)
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			id := strings.TrimPrefix(path, "/rest/ip/firewall/address-list/")
+			found := false
+			for _, e := range mock.addrLists {
+				if e[".id"] == id {
+					for k, v := range body {
+						e[k] = v
+					}
+					found = true
+				}
+			}
+			if !found {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":404,"message":"no such item"}`))
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 
 		case r.Method == "GET" && path == "/rest/ipv6/firewall/filter":
 			_ = json.NewEncoder(w).Encode(mock.ipv6Rules)
+
+		case r.Method == "DELETE" && strings.HasPrefix(path, "/rest/ipv6/firewall/filter/"):
+			mock.deletedURLs = append(mock.deletedURLs, path)
+			id := strings.TrimPrefix(path, "/rest/ipv6/firewall/filter/")
+			var kept []map[string]interface{}
+			for _, rule := range mock.ipv6Rules {
+				if rule[".id"] != id {
+					kept = append(kept, rule)
+				}
+			}
+			mock.ipv6Rules = kept
+			w.WriteHeader(http.StatusOK)
 
 		case r.Method == "POST" && path == "/rest/ipv6/firewall/filter/add":
 			var body map[string]interface{}
@@ -190,16 +290,19 @@ func setupMockRouter() (*mockRouterState, *httptest.Server) {
 			_ = json.NewEncoder(w).Encode(mock.v6Neighbors)
 
 		case r.Method == "GET" && path == "/rest/routing/table":
-			_ = json.NewEncoder(w).Encode([]map[string]interface{}{{"name": "via-proxy"}})
+			_ = json.NewEncoder(w).Encode(mock.tables)
 
 		case r.Method == "GET" && path == "/rest/ip/firewall/filter":
-			_ = json.NewEncoder(w).Encode([]map[string]interface{}{{"comment": "proxy-dash-killswitch", "packets": "120", "bytes": "8500"}})
+			_ = json.NewEncoder(w).Encode(mock.v4Filters)
 
 		case r.Method == "GET" && path == "/rest/ip/firewall/nat":
-			_ = json.NewEncoder(w).Encode([]map[string]interface{}{{"action": "dst-nat", "dst-port": "53"}})
+			_ = json.NewEncoder(w).Encode(mock.natRules)
 
 		case r.Method == "GET" && path == "/rest/routing/rule":
-			_ = json.NewEncoder(w).Encode([]map[string]interface{}{{"table": "via-proxy"}})
+			_ = json.NewEncoder(w).Encode(mock.routeRules)
+
+		case r.Method == "GET" && path == "/rest/ip/firewall/mangle":
+			_ = json.NewEncoder(w).Encode(mock.mangleRules)
 
 		default:
 			w.WriteHeader(http.StatusOK)
@@ -214,7 +317,7 @@ func TestMikroTikClientOperations(t *testing.T) {
 	mock, server := setupMockRouter()
 	defer server.Close()
 
-	client, err := NewClient(server.URL, "admin", "testpass", true)
+	client, err := NewClient(server.URL, "admin", "testpass", Options{})
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
@@ -317,12 +420,15 @@ func TestMikroTikClientOperations(t *testing.T) {
 	// 6. Test LeakGuardStatus
 	_ = st.SaveProxy(&proxy.Proxy{ID: "p1", Name: "Test", Protocol: "http", Host: "1.2.3.4", Port: 80})
 	_ = st.SetDeviceAssignment("10.88.88.50", "00:11:22:33:44:50", "Laptop", "p1")
-	status, err := client.GetLeakGuardStatus(ctx, st, true)
+	status, err := client.GetLeakGuardStatus(ctx, st, EngineStatus{SingboxRunning: true, ForwardGuard: ForwardGuardActive}, nil)
 	if err != nil {
 		t.Fatalf("failed to get LeakGuard status: %v", err)
 	}
-	if status.OverallStatus != "protected" {
-		t.Fatalf("expected status protected, got: %s", status.OverallStatus)
+	if status.OverallStatus != OverallProtected {
+		t.Fatalf("expected status protected, got: %s (%+v)", status.OverallStatus, status.Layers)
+	}
+	if !status.RouterReachable {
+		t.Fatalf("expected router to be reported reachable")
 	}
 	if status.KillSwitchPackets != 120 {
 		t.Fatalf("expected 120 packets, got: %d", status.KillSwitchPackets)

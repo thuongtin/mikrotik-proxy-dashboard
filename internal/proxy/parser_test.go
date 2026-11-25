@@ -150,11 +150,11 @@ invalid:::uri
 
 func TestMalformedInputs(t *testing.T) {
 	badInputs := []string{
-		"http://host:99999",       // Port out of range
-		"http://host:-1",          // Negative port
-		"http://bad host:8080",    // Invalid host characters
-		"vless://@host:443",       // Missing UUID
-		"shadowsocks://",          // Empty SS
+		"http://host:99999",    // Port out of range
+		"http://host:-1",       // Negative port
+		"http://bad host:8080", // Invalid host characters
+		"vless://@host:443",    // Missing UUID
+		"shadowsocks://",       // Empty SS
 	}
 
 	for _, bad := range badInputs {

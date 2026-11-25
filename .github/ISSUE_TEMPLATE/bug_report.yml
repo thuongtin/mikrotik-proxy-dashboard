@@ -1,0 +1,38 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security problems (IP, DNS or IPv6 leaks, auth bypass) must be reported privately, see SECURITY.md.
+        Remove passwords, proxy links, password hashes and session keys from everything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: routeros
+    attributes:
+      label: RouterOS version and router model
+      placeholder: "7.25.1, RB5009UG+S+"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Dashboard version or commit
+  - type: textarea
+    id: leakguard
+    attributes:
+      label: Leak guard status
+      description: The state of the six layers on the Leak guard page, if relevant.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Container log (`/log print where topics~"container"`) with secrets removed.
+      render: text

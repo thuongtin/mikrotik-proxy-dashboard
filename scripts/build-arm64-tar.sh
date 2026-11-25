@@ -3,9 +3,11 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-DIST_DIR="$ROOT_DIR/dist"
+# DIST_DIR and IMAGE_TAG can be overridden to build a trial image without
+# replacing the released one.
+DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 OUTPUT_TAR="$DIST_DIR/proxy-gw-arm64.tar"
-IMAGE_TAG="proxy-gw:arm64"
+IMAGE_TAG="${IMAGE_TAG:-proxy-gw:arm64}"
 
 echo "=== Building mikrotik-proxy-dashboard ARM64 Container ==="
 
@@ -15,22 +17,40 @@ if command -v orb >/dev/null 2>&1; then
     orb start 2>/dev/null || true
 fi
 
-# 2. Prepare output directory
+# 2. Static checks, tests and vulnerability scan. They run in the Dockerfile's
+#    "check" stage, so they use the same pinned Go toolchain and sing-box binary
+#    as the release build. SKIP_CHECKS=1 skips this step; SKIP_VULNCHECK=1 skips
+#    only govulncheck (it needs network access to vuln.go.dev).
+if [ "${SKIP_CHECKS:-0}" = "1" ]; then
+    echo "[check] WARNING: SKIP_CHECKS=1, building without vet, tests and govulncheck" >&2
+else
+    echo "[check] Running go vet, go test and govulncheck (Dockerfile stage: check)..."
+    # --no-cache-filter: a cached result must never stand in for a fresh scan.
+    docker build \
+        --platform linux/arm64 \
+        --target check \
+        --no-cache-filter check \
+        --build-arg "SKIP_VULNCHECK=${SKIP_VULNCHECK:-0}" \
+        --progress plain \
+        "$ROOT_DIR"
+fi
+
+# 3. Prepare output directory
 mkdir -p "$DIST_DIR"
 rm -f "$OUTPUT_TAR"
 
-# 3. Build linux/arm64 Docker image
+# 4. Build linux/arm64 Docker image
 echo "[build] Building Docker image for linux/arm64..."
 docker build \
     --platform linux/arm64 \
     -t "$IMAGE_TAG" \
     "$ROOT_DIR"
 
-# 4. Export container image to .tar archive
+# 5. Export container image to .tar archive
 echo "[build] Saving image to $OUTPUT_TAR..."
 docker save "$IMAGE_TAG" -o "$OUTPUT_TAR"
 
-# 5. Measure and display exact size
+# 6. Measure and display exact size
 FILE_SIZE_BYTES=$(stat -f "%z" "$OUTPUT_TAR" 2>/dev/null || stat -c "%s" "$OUTPUT_TAR" 2>/dev/null)
 FILE_SIZE_MIB=$(awk "BEGIN {printf \"%.2f\", $FILE_SIZE_BYTES / 1048576}")
 
@@ -40,9 +60,15 @@ echo "Image Tag: $IMAGE_TAG"
 echo "File Size: ${FILE_SIZE_MIB} MiB (${FILE_SIZE_BYTES} bytes)"
 echo "=========================================================="
 
-# 6. Verification test inside built container
+# 7. Verification test inside built container
 echo "[verify] Testing sing-box version in container..."
 docker run --rm --platform linux/arm64 "$IMAGE_TAG" sing-box version
+
+echo "[verify] Testing forward guard rules (needs NET_ADMIN, as on the router)..."
+GUARD_RULES=$(docker run --rm --platform linux/arm64 --cap-add NET_ADMIN -e FORWARD_GUARD=enforce "$IMAGE_TAG" iptables -S FORWARD)
+echo "$GUARD_RULES"
+echo "$GUARD_RULES" | grep -q -- "^-P FORWARD DROP" || { echo "[verify] ERROR: FORWARD policy is not DROP" >&2; exit 1; }
+echo "$GUARD_RULES" | grep -q -- "-o tun0 -j ACCEPT" || { echo "[verify] ERROR: tun0 accept rule missing" >&2; exit 1; }
 
 echo "[verify] Testing proxy-dash version in container..."
 docker run --rm --platform linux/arm64 "$IMAGE_TAG" proxy-dash --version

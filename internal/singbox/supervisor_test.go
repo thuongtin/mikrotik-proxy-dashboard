@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/config"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/config"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/state"
 )
 
 func TestSupervisorApplyAndStatus(t *testing.T) {

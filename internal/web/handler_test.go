@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/auth"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/config"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/mikrotik"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/proxy"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/singbox"
-	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/auth"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/config"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/mikrotik"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/proxy"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/singbox"
+	"github.com/thuongtin/mikrotik-proxy-dashboard/internal/state"
 )
 
 func setupTestServer(t *testing.T) (*Server, *httptest.Server, *http.Cookie) {
@@ -64,7 +64,7 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server, *http.Cookie) {
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
 		case "/rest/ipv6/firewall/filter":
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
-		case "/rest/ip/firewall/connection":
+		case "/rest/ip/firewall/connection", "/rest/ipv6/neighbor":
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{})
 		case "/rest/routing/table":
 			_ = json.NewEncoder(w).Encode([]map[string]interface{}{{"name": "via-proxy"}})
@@ -80,7 +80,7 @@ func setupTestServer(t *testing.T) (*Server, *httptest.Server, *http.Cookie) {
 	}))
 	t.Cleanup(func() { routerMock.Close() })
 
-	mkClient, _ := mikrotik.NewClient(routerMock.URL, "admin", "pass", true)
+	mkClient, _ := mikrotik.NewClient(routerMock.URL, "admin", "pass", mikrotik.Options{})
 
 	srv := NewServer(cfg, authMgr, st, sup, mkClient, nil)
 
@@ -275,7 +275,7 @@ func TestWebAPIAssignFailClosedRollback(t *testing.T) {
 	}))
 	t.Cleanup(func() { routerMock.Close() })
 
-	mkClient, _ := mikrotik.NewClient(routerMock.URL, "admin", "pass", true)
+	mkClient, _ := mikrotik.NewClient(routerMock.URL, "admin", "pass", mikrotik.Options{})
 	srv := NewServer(cfg, authMgr, st, sup, mkClient, nil)
 
 	cookie, err := authMgr.Login(pass, "127.0.0.1")
