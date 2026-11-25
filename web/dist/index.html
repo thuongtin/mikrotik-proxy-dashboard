@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MikroTik Proxy Dashboard | RouterOS 7.25 Zero-Leak Gateway</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Toast Notification -->
+  <div id="toast" style="display:none; position:fixed; top:20px; right:20px; z-index:9999; background:#1e293b; color:#fff; padding:12px 20px; border-radius:8px; border:1px solid #3b82f6; box-shadow:0 10px 25px rgba(0,0,0,0.5); font-weight:600;"></div>
+
+  <!-- Login Container -->
+  <div id="login-container" class="login-wrap" style="display: none;">
+    <div class="login-card">
+      <div style="font-size: 2.2rem; margin-bottom: 12px;">🛡️</div>
+      <h2 style="margin-bottom: 6px; font-weight: 700;">Đăng Nhập Dashboard</h2>
+      <p style="color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 24px;">LAN Proxy Gateway & Zero-Leak Controller</p>
+      <form id="login-form">
+        <div class="form-group" style="text-align: left;">
+          <label for="password">Mật khẩu Dashboard</label>
+          <input type="password" id="password" required placeholder="Nhập mật khẩu quản trị..." autofocus>
+        </div>
+        <div id="login-error" style="display:none; color: var(--accent-red); font-size: 0.85rem; margin-bottom: 14px; text-align: left;"></div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; padding: 10px;">Đăng Nhập</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App Container -->
+  <div id="app-container" class="app-container" style="display: none;">
+    
+    <!-- Top Header -->
+    <header>
+      <div class="header-top">
+        <div class="brand">
+          <div style="font-size: 1.6rem;">🛡️</div>
+          <div>
+            <h1>MikroTik Proxy Gateway <span class="brand-badge">RB5009 / RouterOS 7.25</span></h1>
+            <p style="font-size: 0.8rem; color: var(--text-secondary);">Zero-Leak LAN Transparent Proxy & sing-box ARM64 Controller</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <span id="badge-mikrotik" class="badge badge-gray"><span class="badge-dot"></span> Đang kết nối RouterOS...</span>
+          <span id="badge-singbox" class="badge badge-gray"><span class="badge-dot"></span> Đang nạp sing-box...</span>
+          <button id="btn-logout" class="btn btn-sm btn-danger">Đăng xuất</button>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Strip -->
+      <div class="metrics-strip">
+        <div class="metric-card">
+          <div class="metric-label">Thiết bị bảo vệ qua Proxy</div>
+          <div class="metric-val" id="metric-proxied-count" style="color: var(--accent-blue);">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Gói tin Kill-Switch đã chặn</div>
+          <div class="metric-val" id="metric-ks-packets" style="color: var(--accent-green);">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Gói IPv6 phần cứng đã chặn</div>
+          <div class="metric-val" id="metric-v6-packets" style="color: var(--accent-purple);">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Cấp độ bảo vệ Leak Guard</div>
+          <div class="metric-val" id="metric-overall-status" style="color: var(--accent-green); text-transform: uppercase;">ACTIVE</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="tab-devices">📱 Thiết bị LAN (<span id="count-tab-devices">0</span>)</button>
+      <button class="tab-btn" data-tab="tab-proxies">⚡ Quản lý Proxy (<span id="count-tab-proxies">0</span>)</button>
+      <button class="tab-btn" data-tab="tab-leakguard">🛡️ Chống lộ IP & Hệ thống</button>
+    </nav>
+
+    <!-- TAB 1: THIẾT BỊ -->
+    <section id="tab-devices" class="tab-content">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Danh Sách Thiết Bị Mạng LAN</h2>
+            <p style="font-size: 0.8rem; color: var(--text-secondary);">Quản lý gán Proxy, cố định DHCP tĩnh và kích hoạt chế độ Zero-Leak</p>
+          </div>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <input type="text" id="device-search" placeholder="🔍 Tìm theo IP, MAC, tên..." style="max-width: 220px;">
+            <select id="device-filter" style="max-width: 170px;">
+              <option value="all">Tất cả thiết bị</option>
+              <option value="proxied">Đang qua Proxy</option>
+              <option value="direct">Mạng trực tiếp</option>
+              <option value="online">Đang Online</option>
+            </select>
+            <button id="btn-refresh-devices" class="btn btn-sm">🔄 Làm mới</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 40px;">Trạng thái</th>
+                <th>Thiết bị</th>
+                <th>IP / MAC</th>
+                <th>Tuyến Proxy</th>
+                <th>Lá chắn bảo vệ (Leak Guard)</th>
+                <th style="text-align: right;">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="devices-tbody">
+              <tr><td colspan="6" style="text-align:center; color:var(--text-secondary); padding: 30px;">Đang tải danh sách thiết bị...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: PROXY -->
+    <section id="tab-proxies" class="tab-content" style="display: none;">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Danh Sách Proxy Đã Cấu Hình</h2>
+            <p style="font-size: 0.8rem; color: var(--text-secondary);">Hỗ trợ 7 giao thức: HTTP, HTTPS, SOCKS5, Shadowsocks, Trojan, VLESS Reality, VMess</p>
+          </div>
+          <div>
+            <button id="btn-open-add-proxy" class="btn btn-primary">+ Thêm Proxy Mới</button>
+          </div>
+        </div>
+
+        <div id="proxies-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px;">
+          <!-- Proxy cards injected here -->
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: LEAK GUARD & HỆ THỐNG -->
+    <section id="tab-leakguard" class="tab-content" style="display: none;">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Hệ Thống Bảo Vệ 6 Tầng (Zero-Leak Guard)</h2>
+            <p style="font-size: 0.8rem; color: var(--text-secondary);">Đảm bảo chống rò rỉ tuyệt đối (Zero DNS Leak, IPv6 Drop, WebRTC STUN Kill, Fail-Closed)</p>
+          </div>
+          <div style="display: flex; gap: 10px;">
+            <button id="btn-reconcile" class="btn btn-primary">⚡ Đồng bộ lại Router</button>
+            <button id="btn-flush-all" class="btn btn-danger">✂️ Cắt toàn bộ kết nối Proxy</button>
+          </div>
+        </div>
+
+        <div id="leakguard-layers" style="margin-bottom: 24px;">
+          <!-- 6 Layers injected here -->
+        </div>
+
+        <!-- Links to verify leaks -->
+        <div style="background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+          <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 10px; color: #60a5fa;">🔍 Kiểm tra rò rỉ IP thực tế trên thiết bị của bạn:</h3>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;">
+            <a href="https://ipleak.net" target="_blank" class="btn btn-sm">ipleak.net ↗</a>
+            <a href="https://browserleaks.com/dns" target="_blank" class="btn btn-sm">browserleaks.com/dns ↗</a>
+            <a href="https://browserleaks.com/webrtc" target="_blank" class="btn btn-sm">browserleaks.com/webrtc ↗</a>
+            <a href="https://test-ipv6.com" target="_blank" class="btn btn-sm">test-ipv6.com ↗</a>
+          </div>
+          <p style="font-size: 0.8rem; color: var(--text-secondary);">
+            ⚠️ <strong>Lưu ý quan trọng cho điện thoại (iPhone/Android):</strong> Hãy tắt tính năng <em>"Wi-Fi Assist"</em> (Tự động chuyển 4G/5G khi mạng yếu) và tắt tính năng <em>"Private Wi-Fi Address" / Địa chỉ MAC ngẫu nhiên</em> khi kết nối Wi-Fi nhà để Router luôn nhận diện đúng thiết bị của bạn.
+          </p>
+        </div>
+
+        <!-- Sing-box System Logs -->
+        <div class="panel-header" style="margin-top: 10px;">
+          <h3 style="font-size: 1rem; font-weight: 600;">Nhật Ký sing-box Gần Đây (Sanitized Logs)</h3>
+          <button id="btn-refresh-logs" class="btn btn-sm">🔄 Làm mới log</button>
+        </div>
+        <div id="singbox-logs" class="log-box">Đang tải nhật ký sing-box...</div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- MODAL: ADD / EDIT PROXY -->
+  <div id="modal-proxy" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-proxy-title" class="modal-title">Thêm Proxy Mới</h3>
+        <button id="btn-close-proxy-modal" class="modal-close">&times;</button>
+      </div>
+
+      <div class="nav-tabs" style="margin-bottom: 16px;">
+        <button id="tab-btn-quick-import" class="tab-btn active" type="button">📋 Dán Nhanh URI</button>
+        <button id="tab-btn-manual-form" class="tab-btn" type="button">⚙️ Nhập Thủ Công</button>
+      </div>
+
+      <!-- Quick Import Mode -->
+      <div id="proxy-quick-import-wrap">
+        <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 10px;">
+          Dán 1 hoặc nhiều link proxy (mỗi dòng 1 link): <code>socks5://</code>, <code>http://</code>, <code>https://</code>, <code>vless://</code>, <code>vmess://</code>, <code>ss://</code>, <code>trojan://</code> hoặc định dạng <code>host:port:user:pass</code>.
+        </p>
+        <div class="form-group">
+          <textarea id="import-text" rows="8" placeholder="socks5://user:pass@1.2.3.4:1080#MyProxy&#10;vless://uuid@host:443?security=reality&...&#10;192.168.1.50:8080:user:pass"></textarea>
+        </div>
+        <div class="form-group">
+          <label>Giao thức mặc định (cho định dạng host:port):</label>
+          <select id="import-default-proto">
+            <option value="http">HTTP</option>
+            <option value="socks5" selected>SOCKS5</option>
+            <option value="https">HTTPS</option>
+          </select>
+        </div>
+        <button id="btn-submit-import" class="btn btn-primary" style="width: 100%;">Nhập Danh Sách Proxy</button>
+      </div>
+
+      <!-- Manual Input Mode -->
+      <form id="proxy-manual-form" style="display: none;">
+        <input type="hidden" id="p-id">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Tên gợi nhớ:</label>
+            <input type="text" id="p-name" placeholder="Ví dụ: US Premium SOCKS5">
+          </div>
+          <div class="form-group">
+            <label>Giao thức:</label>
+            <select id="p-protocol">
+              <option value="socks5">SOCKS5</option>
+              <option value="http">HTTP</option>
+              <option value="https">HTTPS</option>
+              <option value="shadowsocks">Shadowsocks</option>
+              <option value="trojan">Trojan</option>
+              <option value="vless">VLESS</option>
+              <option value="vmess">VMess</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Máy chủ (Host / IP):</label>
+            <input type="text" id="p-host" required placeholder="1.2.3.4 hoặc proxy.domain.com">
+          </div>
+          <div class="form-group">
+            <label>Cổng (Port):</label>
+            <input type="number" id="p-port" required min="1" max="65535" value="1080">
+          </div>
+        </div>
+
+        <!-- Auth fields (HTTP / SOCKS5) -->
+        <div id="p-group-auth" class="form-row">
+          <div class="form-group">
+            <label>Tên đăng nhập (Username):</label>
+            <input type="text" id="p-username" placeholder="Tùy chọn">
+          </div>
+          <div class="form-group">
+            <label>Mật khẩu (Password):</label>
+            <input type="password" id="p-password" placeholder="Tùy chọn">
+          </div>
+        </div>
+
+        <!-- Shadowsocks fields -->
+        <div id="p-group-ss" class="form-row" style="display: none;">
+          <div class="form-group">
+            <label>Phương thức mã hóa (Method):</label>
+            <select id="p-ss-method">
+              <option value="aes-256-gcm">aes-256-gcm</option>
+              <option value="aes-128-gcm">aes-128-gcm</option>
+              <option value="chacha20-ietf-poly1305">chacha20-ietf-poly1305</option>
+              <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Mật khẩu SS:</label>
+            <input type="password" id="p-ss-pass" placeholder="Secret Key">
+          </div>
+        </div>
+
+        <!-- VLESS / VMess fields -->
+        <div id="p-group-uuid" class="form-group" style="display: none;">
+          <label>UUID:</label>
+          <input type="text" id="p-uuid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+        </div>
+
+        <!-- Reality / TLS fields -->
+        <div id="p-group-reality" style="display: none;">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Bảo mật (Security):</label>
+              <select id="p-security">
+                <option value="none">None</option>
+                <option value="tls">TLS</option>
+                <option value="reality">Reality</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>SNI (Server Name):</label>
+              <input type="text" id="p-sni" placeholder="target.com">
+            </div>
+          </div>
+          <div id="p-reality-fields" class="form-row" style="display: none;">
+            <div class="form-group">
+              <label>Public Key (pbk):</label>
+              <input type="text" id="p-pbk">
+            </div>
+            <div class="form-group">
+              <label>Short ID (sid):</label>
+              <input type="text" id="p-sid">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 8px;">
+          <input type="checkbox" id="p-udp" style="width: auto;">
+          <label for="p-udp" style="margin-bottom: 0;">Hỗ trợ chuyển tiếp UDP (Bỏ chọn sẽ kích hoạt bộ chặn STUN chống rò rỉ WebRTC)</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 10px;">Lưu Cấu Hình Proxy</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: EDIT NICKNAME -->
+  <div id="modal-nickname" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Đổi Tên Gợi Nhớ</h3>
+        <button id="btn-close-nickname-modal" class="modal-close">&times;</button>
+      </div>
+      <form id="nickname-form">
+        <input type="hidden" id="nick-ip">
+        <div class="form-group">
+          <label id="nick-device-label">Thiết bị: </label>
+          <input type="text" id="nick-input" placeholder="Ví dụ: iPhone của Ethan, TV Phòng Khách...">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Lưu Tên</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Binaries and build artifacts
+proxy-dash
+*.tar
+/dist/
+bin/
+
+# Persistent data and caches
+data/
+*.db
+*.key
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
