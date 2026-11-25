@@ -95,19 +95,24 @@ func (c *Client) EnsureIPv6BlockRules(ctx context.Context, mac string) error {
 	}
 
 	var rules []ipv6FilterRule
-	err := c.Do(ctx, "GET", "/ipv6/firewall/filter", nil, &rules)
-	if err != nil {
-		// IPv6 firewall might be disabled or unavailable on some setups
-		return nil
+	if err := c.Do(ctx, "GET", "/ipv6/firewall/filter", nil, &rules); err != nil {
+		return fmt.Errorf("failed to query IPv6 firewall filter rules: %w", err)
 	}
 
 	fwdComment := fmt.Sprintf("proxy-dash-ipv6-fwd:%s", cleanMac)
 	inComment := fmt.Sprintf("proxy-dash-ipv6-in:%s", cleanMac)
 
+	// Find the first regular (non-dynamic, non-proxy-dash) rule to place our drop rules before
+	var firstRegularRuleID string
+	for _, r := range rules {
+		if r.Dynamic != "true" && !strings.HasPrefix(r.Comment, "proxy-dash-ipv6-") {
+			firstRegularRuleID = r.ID
+			break
+		}
+	}
+
 	hasFwd := false
 	hasIn := false
-	firstNonDynamicID := ""
-
 	for _, r := range rules {
 		if r.Comment == fwdComment {
 			hasFwd = true
@@ -115,10 +120,9 @@ func (c *Client) EnsureIPv6BlockRules(ctx context.Context, mac string) error {
 		if r.Comment == inComment {
 			hasIn = true
 		}
-		if firstNonDynamicID == "" && r.Dynamic != "true" {
-			firstNonDynamicID = r.ID
-		}
 	}
+
+	rulesAdded := false
 
 	if !hasFwd {
 		payload := map[string]interface{}{
@@ -128,10 +132,13 @@ func (c *Client) EnsureIPv6BlockRules(ctx context.Context, mac string) error {
 			"reject-with":     "icmp-admin-prohibited",
 			"comment":         fwdComment,
 		}
-		if firstNonDynamicID != "" {
-			payload["place-before"] = firstNonDynamicID
+		if firstRegularRuleID != "" {
+			payload["place-before"] = firstRegularRuleID
 		}
-		_ = c.Do(ctx, "PUT", "/ipv6/firewall/filter", payload, nil)
+		if err := c.Do(ctx, "POST", "/ipv6/firewall/filter/add", payload, nil); err != nil {
+			return fmt.Errorf("failed to add IPv6 forward rule for %s: %w", cleanMac, err)
+		}
+		rulesAdded = true
 	}
 
 	if !hasIn {
@@ -142,10 +149,46 @@ func (c *Client) EnsureIPv6BlockRules(ctx context.Context, mac string) error {
 			"reject-with":     "icmp-admin-prohibited",
 			"comment":         inComment,
 		}
-		if firstNonDynamicID != "" {
-			payload["place-before"] = firstNonDynamicID
+		if firstRegularRuleID != "" {
+			payload["place-before"] = firstRegularRuleID
 		}
-		_ = c.Do(ctx, "PUT", "/ipv6/firewall/filter", payload, nil)
+		if err := c.Do(ctx, "POST", "/ipv6/firewall/filter/add", payload, nil); err != nil {
+			return fmt.Errorf("failed to add IPv6 input rule for %s: %w", cleanMac, err)
+		}
+		rulesAdded = true
+	}
+
+	// If rules were added, re-fetch rules from RouterOS to inspect actual order
+	if rulesAdded {
+		if err := c.Do(ctx, "GET", "/ipv6/firewall/filter", nil, &rules); err != nil {
+			return fmt.Errorf("failed to refresh IPv6 firewall filter rules: %w", err)
+		}
+	}
+
+	// Locate first regular rule position in the current list
+	firstRegularIndex := -1
+	firstRegularRuleID = ""
+	for i, r := range rules {
+		if r.Dynamic != "true" && !strings.HasPrefix(r.Comment, "proxy-dash-ipv6-") {
+			firstRegularIndex = i
+			firstRegularRuleID = r.ID
+			break
+		}
+	}
+
+	// If any proxy-dash-ipv6-* rule appears AFTER firstRegularRuleID, move it above firstRegularRuleID
+	if firstRegularIndex != -1 && firstRegularRuleID != "" {
+		for i, r := range rules {
+			if strings.HasPrefix(r.Comment, "proxy-dash-ipv6-") && i > firstRegularIndex {
+				movePayload := map[string]string{
+					"numbers":     r.ID,
+					"destination": firstRegularRuleID,
+				}
+				if err := c.Do(ctx, "POST", "/ipv6/firewall/filter/move", movePayload, nil); err != nil {
+					return fmt.Errorf("failed to move IPv6 rule %s (%s) before %s: %w", r.ID, r.Comment, firstRegularRuleID, err)
+				}
+			}
+		}
 	}
 
 	return nil
@@ -159,9 +202,8 @@ func (c *Client) RemoveIPv6BlockRules(ctx context.Context, mac string) error {
 	}
 
 	var rules []ipv6FilterRule
-	err := c.Do(ctx, "GET", "/ipv6/firewall/filter", nil, &rules)
-	if err != nil {
-		return nil
+	if err := c.Do(ctx, "GET", "/ipv6/firewall/filter", nil, &rules); err != nil {
+		return fmt.Errorf("failed to query IPv6 firewall filter rules: %w", err)
 	}
 
 	fwdComment := fmt.Sprintf("proxy-dash-ipv6-fwd:%s", cleanMac)
@@ -169,7 +211,9 @@ func (c *Client) RemoveIPv6BlockRules(ctx context.Context, mac string) error {
 
 	for _, r := range rules {
 		if r.Comment == fwdComment || r.Comment == inComment {
-			_ = c.Do(ctx, "DELETE", fmt.Sprintf("/ipv6/firewall/filter/%s", r.ID), nil, nil)
+			if err := c.Do(ctx, "DELETE", fmt.Sprintf("/ipv6/firewall/filter/%s", r.ID), nil, nil); err != nil {
+				return fmt.Errorf("failed to delete IPv6 rule %s (%s): %w", r.ID, r.Comment, err)
+			}
 		}
 	}
 	return nil

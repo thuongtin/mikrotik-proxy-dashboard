@@ -3,6 +3,7 @@ package mikrotik
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,6 +25,8 @@ type mockRouterState struct {
 	v6Neighbors []map[string]interface{}
 	madeStatic  []string
 	deletedURLs []string
+	adds        []map[string]interface{}
+	moves       []map[string]string
 }
 
 func setupMockRouter() (*mockRouterState, *httptest.Server) {
@@ -127,6 +130,48 @@ func setupMockRouter() (*mockRouterState, *httptest.Server) {
 		case r.Method == "GET" && path == "/rest/ipv6/firewall/filter":
 			_ = json.NewEncoder(w).Encode(mock.ipv6Rules)
 
+		case r.Method == "POST" && path == "/rest/ipv6/firewall/filter/add":
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			body[".id"] = fmt.Sprintf("*R_%d", len(mock.ipv6Rules)+1)
+			mock.adds = append(mock.adds, body)
+			// Simulate RouterOS 7.25.1 where add appends at bottom even if place-before is passed
+			mock.ipv6Rules = append(mock.ipv6Rules, body)
+			w.WriteHeader(http.StatusOK)
+
+		case r.Method == "POST" && path == "/rest/ipv6/firewall/filter/move":
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mock.moves = append(mock.moves, body)
+			num := body["numbers"]
+			dest := body["destination"]
+			// Find and remove rule with ID num
+			numIdx := -1
+			var ruleToMove map[string]interface{}
+			for i, r := range mock.ipv6Rules {
+				if r[".id"] == num {
+					numIdx = i
+					ruleToMove = r
+					break
+				}
+			}
+			if numIdx != -1 {
+				mock.ipv6Rules = append(mock.ipv6Rules[:numIdx], mock.ipv6Rules[numIdx+1:]...)
+				destIdx := -1
+				for i, r := range mock.ipv6Rules {
+					if r[".id"] == dest {
+						destIdx = i
+						break
+					}
+				}
+				if destIdx != -1 {
+					mock.ipv6Rules = append(mock.ipv6Rules[:destIdx], append([]map[string]interface{}{ruleToMove}, mock.ipv6Rules[destIdx:]...)...)
+				} else {
+					mock.ipv6Rules = append([]map[string]interface{}{ruleToMove}, mock.ipv6Rules...)
+				}
+			}
+			w.WriteHeader(http.StatusOK)
+
 		case r.Method == "PUT" && path == "/rest/ipv6/firewall/filter":
 			var body map[string]interface{}
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -212,26 +257,47 @@ func TestMikroTikClientOperations(t *testing.T) {
 		t.Fatalf("expected address list added, got: %+v", mock.addrLists)
 	}
 
-	// 4. Test EnsureIPv6BlockRules
+	// 4. Test EnsureIPv6BlockRules (verifies POST /add and POST /move placing rules before *R1)
 	if err := client.EnsureIPv6BlockRules(ctx, "00:11:22:33:44:50"); err != nil {
 		t.Fatalf("failed to ensure ipv6 rules: %v", err)
 	}
-	// Check that 2 rules (forward and input) were added before firstNonDynamicID
-	fwdFound := false
-	inFound := false
-	for _, r := range mock.ipv6Rules {
-		if r["comment"] == "proxy-dash-ipv6-fwd:00:11:22:33:44:50" {
-			fwdFound = true
-			if r["place-before"] != "*R1" {
-				t.Fatalf("expected place-before *R1, got: %v", r["place-before"])
-			}
-		}
-		if r["comment"] == "proxy-dash-ipv6-in:00:11:22:33:44:50" {
-			inFound = true
+	if len(mock.adds) != 2 {
+		t.Fatalf("expected 2 rules added via POST /add, got: %d", len(mock.adds))
+	}
+	for _, add := range mock.adds {
+		if add["place-before"] != "*R1" {
+			t.Fatalf("expected place-before *R1 in add payload, got: %v", add["place-before"])
 		}
 	}
-	if !fwdFound || !inFound {
-		t.Fatalf("expected both IPv6 forward and input reject rules to be created")
+	if len(mock.moves) != 2 {
+		t.Fatalf("expected 2 rules moved via POST /move, got: %d", len(mock.moves))
+	}
+	for _, mv := range mock.moves {
+		if mv["destination"] != "*R1" {
+			t.Fatalf("expected move destination *R1, got: %v", mv["destination"])
+		}
+	}
+
+	// Verify that in the final mock.ipv6Rules slice, both proxy-dash rules appear BEFORE *R1
+	r1Index := -1
+	fwdIndex := -1
+	inIndex := -1
+	for idx, r := range mock.ipv6Rules {
+		if r[".id"] == "*R1" {
+			r1Index = idx
+		}
+		if r["comment"] == "proxy-dash-ipv6-fwd:00:11:22:33:44:50" {
+			fwdIndex = idx
+		}
+		if r["comment"] == "proxy-dash-ipv6-in:00:11:22:33:44:50" {
+			inIndex = idx
+		}
+	}
+	if fwdIndex == -1 || inIndex == -1 || r1Index == -1 {
+		t.Fatalf("rules not found in mock.ipv6Rules: fwd=%d, in=%d, r1=%d", fwdIndex, inIndex, r1Index)
+	}
+	if fwdIndex >= r1Index || inIndex >= r1Index {
+		t.Fatalf("expected proxy-dash rules to be positioned before *R1, got fwdIndex=%d, inIndex=%d, r1Index=%d", fwdIndex, inIndex, r1Index)
 	}
 
 	// 5. Test FlushDeviceConnections (deletes *C1)

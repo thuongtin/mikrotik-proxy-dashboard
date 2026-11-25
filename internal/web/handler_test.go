@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/ethan/mikrotik-proxy-dashboard/internal/auth"
@@ -209,5 +210,108 @@ func TestWebAPIDeviceAssignment(t *testing.T) {
 	devAfter := srv.state.GetDevice("10.88.88.50")
 	if devAfter.ProxyID != "" {
 		t.Fatalf("expected proxyId to be empty after unassign")
+	}
+}
+
+func TestWebAPIAssignFailClosedRollback(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "web_failclosed_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(tempDir) })
+
+	pass := "AdminPass123!"
+	passHash, _ := auth.HashPassword(pass)
+
+	cfg := &config.Config{
+		DataDir:               tempDir,
+		LanCIDR:               "10.88.88.0/24",
+		ContainerGW:           "10.10.10.1",
+		SingboxPath:           "sing-box",
+		DashboardPasswordHash: passHash,
+	}
+
+	authMgr, err := auth.NewAuthManager(tempDir, passHash)
+	if err != nil {
+		t.Fatalf("failed to create AuthManager: %v", err)
+	}
+
+	st, err := state.Load(tempDir)
+	if err != nil {
+		t.Fatalf("failed to create State: %v", err)
+	}
+
+	sup := singbox.NewSupervisor("sing-box", tempDir)
+	t.Cleanup(func() { sup.Stop() })
+
+	removedAddressList := false
+	routerMock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/rest/ip/dhcp-server/lease":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"address": "10.88.88.50", "mac-address": "00:11:22:33:44:50", "status": "bound", "dynamic": "true", ".id": "*1"},
+			})
+		case r.URL.Path == "/rest/ip/firewall/address-list" && r.Method == "PUT":
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/rest/ip/firewall/address-list" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"list": "PROXY_DEVICES", "address": "10.88.88.50", ".id": "*AL1"},
+			})
+		case strings.HasPrefix(r.URL.Path, "/rest/ip/firewall/address-list/*AL1") && r.Method == "DELETE":
+			removedAddressList = true
+			w.WriteHeader(http.StatusOK)
+		case r.URL.Path == "/rest/ipv6/firewall/filter" && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{".id": "*R1", "chain": "forward", "action": "accept", "dynamic": "false"},
+			})
+		case r.URL.Path == "/rest/ipv6/firewall/filter/add" && r.Method == "POST":
+			// Simulate IPv6 error failure
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error": 500, "message": "IPv6 firewall failure"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(func() { routerMock.Close() })
+
+	mkClient, _ := mikrotik.NewClient(routerMock.URL, "admin", "pass", true)
+	srv := NewServer(cfg, authMgr, st, sup, mkClient, nil)
+
+	cookie, err := authMgr.Login(pass, "127.0.0.1")
+	if err != nil {
+		t.Fatalf("failed to generate cookie: %v", err)
+	}
+
+	p := &proxy.Proxy{
+		ID:       "p-test",
+		Name:     "HTTP Proxy",
+		Protocol: proxy.ProtoHTTP,
+		Host:     "1.1.1.1",
+		Port:     8080,
+	}
+	_ = srv.state.SaveProxy(p)
+
+	assignPayload := map[string]string{
+		"mac":      "00:11:22:33:44:50",
+		"nickname": "Test PC",
+		"proxyId":  "p-test",
+	}
+	assignBytes, _ := json.Marshal(assignPayload)
+	req := httptest.NewRequest(http.MethodPut, "/api/devices/10.88.88.50/assignment", bytes.NewReader(assignBytes))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 InternalServerError on IPv6 failure, got: %d", w.Code)
+	}
+	if !removedAddressList {
+		t.Fatalf("expected address list to be rolled back on IPv6 failure (Fail-Closed)")
+	}
+	// State should NOT have been updated with this assignment
+	dev := srv.state.GetDevice("10.88.88.50")
+	if dev != nil && dev.ProxyID != "" {
+		t.Fatalf("expected state not to save assignment on failure")
 	}
 }

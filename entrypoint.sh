@@ -25,6 +25,13 @@ echo "[entrypoint] Uplink interface: $VETH_IF, Gateway: $CONTAINER_GW, LAN CIDR:
 # Enable IPv4 forwarding for transparent routing
 sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
 
+# Disable strict reverse-path filtering so forwarded LAN packets entering tun0 are never dropped
+sysctl -w net.ipv4.conf.all.rp_filter=0 2>/dev/null || true
+sysctl -w net.ipv4.conf.default.rp_filter=0 2>/dev/null || true
+if [ -n "$VETH_IF" ]; then
+    sysctl -w "net.ipv4.conf.${VETH_IF}.rp_filter=0" 2>/dev/null || true
+fi
+
 # Add explicit route for LAN return traffic to preserve true device source IP without NAT
 if [ -n "$LAN_CIDR" ] && [ -n "$CONTAINER_GW" ] && [ -n "$VETH_IF" ]; then
     echo "[entrypoint] Ensuring direct route for $LAN_CIDR via $CONTAINER_GW dev $VETH_IF"

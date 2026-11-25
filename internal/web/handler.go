@@ -269,6 +269,13 @@ func (s *Server) handleAssignDevice(w http.ResponseWriter, r *http.Request, ip s
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
+	// If MAC is not in request, try to lookup from state
+	if req.MAC == "" {
+		if dev := s.state.GetDevice(ip); dev != nil && dev.MAC != "" {
+			req.MAC = dev.MAC
+		}
+	}
+
 	// 1. Ensure static DHCP lease
 	if err := s.mikrotik.EnsureStaticLease(ctx, ip, req.MAC); err != nil {
 		s.jsonError(w, http.StatusInternalServerError, fmt.Sprintf("Không thể cố định DHCP lease: %v", err))
@@ -281,9 +288,13 @@ func (s *Server) handleAssignDevice(w http.ResponseWriter, r *http.Request, ip s
 		return
 	}
 
-	// 3. Ensure IPv6 MAC block rules
+	// 3. Ensure IPv6 MAC block rules (fail-closed: rollback PROXY_DEVICES if IPv6 block fails)
 	if req.MAC != "" {
-		_ = s.mikrotik.EnsureIPv6BlockRules(ctx, req.MAC)
+		if err := s.mikrotik.EnsureIPv6BlockRules(ctx, req.MAC); err != nil {
+			_ = s.mikrotik.RemoveProxyAddressList(ctx, ip)
+			s.jsonError(w, http.StatusInternalServerError, fmt.Sprintf("Không thể thiết lập quy tắc chặn IPv6 (Fail-Closed): %v", err))
+			return
+		}
 	}
 
 	// 4. Update persistent state
