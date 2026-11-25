@@ -3,6 +3,7 @@ let currentDevices = [];
 let currentProxies = [];
 let activeTab = "tab-devices";
 let autoRefreshTimer = null;
+const pendingProxySelections = new Map(); // Track unsaved proxy selections per IP
 
 // Initialize app
 document.addEventListener("DOMContentLoaded", () => {
@@ -49,8 +50,18 @@ function showDashboard() {
   if (autoRefreshTimer) clearInterval(autoRefreshTimer);
   autoRefreshTimer = setInterval(() => {
     loadStatus();
-    if (activeTab === "tab-devices") loadDevices();
-  }, 10000);
+    if (activeTab === "tab-devices") {
+      // Skip background refresh if user is interacting with an input/select/button in #tab-devices
+      // OR if there is any unsaved dropdown selection, preventing DOM/dropdown jumping.
+      const activeEl = document.activeElement;
+      const isUserInteracting = activeEl && activeEl.closest("#tab-devices") &&
+        ["INPUT", "SELECT", "BUTTON"].includes(activeEl.tagName);
+      const hasUnsavedChanges = pendingProxySelections.size > 0;
+      if (!isUserInteracting && !hasUnsavedChanges) {
+        loadDevices();
+      }
+    }
+  }, 15000);
 }
 
 // Event Listeners
@@ -507,6 +518,42 @@ async function loadDevices() {
   }
 }
 
+function parseIPv4(ipStr) {
+  if (!ipStr || typeof ipStr !== "string") return null;
+  const parts = ipStr.split(".");
+  if (parts.length !== 4) return null;
+  const nums = [];
+  for (let i = 0; i < 4; i++) {
+    const n = Number(parts[i]);
+    if (isNaN(n) || n < 0 || n > 255 || parts[i].trim() === "") return null;
+    nums.push(n);
+  }
+  return nums;
+}
+
+function compareDevices(a, b) {
+  // 1. Assigned (true before false)
+  if (Boolean(a.assigned) !== Boolean(b.assigned)) {
+    return a.assigned ? -1 : 1;
+  }
+  // 2. Online (true before false)
+  if (Boolean(a.online) !== Boolean(b.online)) {
+    return a.online ? -1 : 1;
+  }
+  // 3. Numeric IPv4 ascending
+  const ipA = parseIPv4(a.ip);
+  const ipB = parseIPv4(b.ip);
+  if (ipA && ipB) {
+    for (let i = 0; i < 4; i++) {
+      if (ipA[i] !== ipB[i]) return ipA[i] - ipB[i];
+    }
+  } else {
+    const cmp = String(a.ip || "").localeCompare(String(b.ip || ""));
+    if (cmp !== 0) return cmp;
+  }
+  return String(a.mac || "").localeCompare(String(b.mac || ""));
+}
+
 function renderDevicesTable() {
   const tbody = document.getElementById("devices-tbody");
   const searchQuery = document.getElementById("device-search").value.toLowerCase().trim();
@@ -514,7 +561,10 @@ function renderDevicesTable() {
 
   tbody.innerHTML = "";
 
-  const filtered = currentDevices.filter((d) => {
+  // Deterministic Frontend Sorting: Assigned -> Online -> Numeric IPv4 ascending
+  const sortedDevices = [...currentDevices].sort(compareDevices);
+
+  const filtered = sortedDevices.filter((d) => {
     // Search filter
     const matchesSearch =
       (d.ip && d.ip.toLowerCase().includes(searchQuery)) ||
@@ -548,10 +598,14 @@ function renderDevicesTable() {
     const displayName = d.nickname || d.hostname || "Thiết bị không tên";
     const editNickBtn = `<button class="btn btn-sm btn-edit-nick" data-ip="${d.ip}" data-nick="${escapeHTML(d.nickname || "")}" data-host="${escapeHTML(d.hostname || "")}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer;">✏️</button>`;
 
-    // Proxy Dropdown
-    let proxyOptions = '<option value="">(Mạng trực tiếp - Direct)</option>';
+    // Proxy Dropdown (preserving any unsaved/dirty selection)
+    const effectiveProxyId = pendingProxySelections.has(d.ip)
+      ? pendingProxySelections.get(d.ip)
+      : (d.proxyId || "");
+
+    let proxyOptions = `<option value="" ${effectiveProxyId === "" ? "selected" : ""}>(Mạng trực tiếp - Direct)</option>`;
     currentProxies.forEach((p) => {
-      const selected = d.proxyId === p.id ? "selected" : "";
+      const selected = effectiveProxyId === p.id ? "selected" : "";
       proxyOptions += `<option value="${p.id}" ${selected}>${escapeHTML(p.name)} (${p.protocol.toUpperCase()})</option>`;
     });
 
@@ -604,6 +658,18 @@ function renderDevicesTable() {
       document.getElementById("modal-nickname").style.display = "flex";
     });
 
+    // Track dirty dropdown selection
+    const proxySelectEl = tr.querySelector(`.device-proxy-select[data-ip="${d.ip}"]`);
+    proxySelectEl.addEventListener("change", (e) => {
+      const newSel = e.target.value;
+      const originalProxyId = d.proxyId || "";
+      if (newSel !== originalProxyId) {
+        pendingProxySelections.set(d.ip, newSel);
+      } else {
+        pendingProxySelections.delete(d.ip);
+      }
+    });
+
     tr.querySelector(".btn-apply-proxy").addEventListener("click", async (e) => {
       const ip = e.currentTarget.getAttribute("data-ip");
       const mac = e.currentTarget.getAttribute("data-mac");
@@ -620,6 +686,7 @@ function renderDevicesTable() {
           body: JSON.stringify({ mac, proxyId }),
         });
         if (res.ok) {
+          pendingProxySelections.delete(ip);
           showToast(`Đã cập nhật tuyến Proxy cho ${ip}`);
           loadDevices();
           loadStatus();

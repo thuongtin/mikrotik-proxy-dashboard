@@ -1,9 +1,11 @@
 package mikrotik
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
+	"sort"
 	"strings"
 
 	"github.com/ethan/mikrotik-proxy-dashboard/internal/state"
@@ -144,7 +146,45 @@ func (c *Client) GetDevices(ctx context.Context, lanCIDR string, st *state.State
 		res = append(res, dev)
 	}
 
+	SortDevices(res)
+
 	return res, nil
+}
+
+// SortDevices sorts devices deterministically:
+// 1. Assigned (true before false)
+// 2. Online (true before false)
+// 3. Numeric IPv4 order ascending (bytes.Compare(ipA.To4(), ipB.To4()), falling back to string compare)
+func SortDevices(devs []*Device) {
+	sort.Slice(devs, func(i, j int) bool {
+		a, b := devs[i], devs[j]
+
+		// 1. Assigned (true before false)
+		if a.Assigned != b.Assigned {
+			return a.Assigned && !b.Assigned
+		}
+
+		// 2. Online (true before false)
+		if a.Online != b.Online {
+			return a.Online && !b.Online
+		}
+
+		// 3. Numeric IPv4 ascending
+		ipA := net.ParseIP(a.IP).To4()
+		ipB := net.ParseIP(b.IP).To4()
+		if ipA != nil && ipB != nil {
+			cmp := bytes.Compare(ipA, ipB)
+			if cmp != 0 {
+				return cmp < 0
+			}
+		} else {
+			if a.IP != b.IP {
+				return a.IP < b.IP
+			}
+		}
+
+		return a.MAC < b.MAC
+	})
 }
 
 // EnsureStaticLease converts a dynamic DHCP lease to static so device IP never shifts.

@@ -328,3 +328,43 @@ func TestMikroTikClientOperations(t *testing.T) {
 		t.Fatalf("expected 120 packets, got: %d", status.KillSwitchPackets)
 	}
 }
+
+func TestDeterministicDeviceSorting(t *testing.T) {
+	devices := []*Device{
+		{IP: "10.88.88.29", Assigned: false, Online: true, MAC: "00:11:22:33:44:29"},
+		{IP: "10.88.88.10", Assigned: true, Online: false, MAC: "00:11:22:33:44:10"},
+		{IP: "10.88.88.3", Assigned: true, Online: true, MAC: "00:11:22:33:44:03"},
+		{IP: "10.88.88.2", Assigned: false, Online: false, MAC: "00:11:22:33:44:02"},
+		{IP: "10.88.88.100", Assigned: true, Online: true, MAC: "00:11:22:33:44:a0"},
+		{IP: "10.88.88.5", Assigned: false, Online: true, MAC: "00:11:22:33:44:05"},
+	}
+
+	// Expected order:
+	// 1. Assigned (true):
+	//    - Online (true): 10.88.88.3, 10.88.88.100
+	//    - Online (false): 10.88.88.10
+	// 2. Assigned (false):
+	//    - Online (true): 10.88.88.5, 10.88.88.29
+	//    - Online (false): 10.88.88.2
+	expectedIPs := []string{
+		"10.88.88.3",
+		"10.88.88.100",
+		"10.88.88.10",
+		"10.88.88.5",
+		"10.88.88.29",
+		"10.88.88.2",
+	}
+
+	for run := 0; run < 5; run++ {
+		copied := make([]*Device, len(devices))
+		copy(copied, devices)
+
+		SortDevices(copied)
+
+		for i, dev := range copied {
+			if dev.IP != expectedIPs[i] {
+				t.Fatalf("run %d index %d: expected IP %s, got %s", run, i, expectedIPs[i], dev.IP)
+			}
+		}
+	}
+}
