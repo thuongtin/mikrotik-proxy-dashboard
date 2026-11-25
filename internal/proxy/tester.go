@@ -1,17 +1,28 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
+	"strings"
+	"sync"
 	"time"
 )
+
+var (
+	sensitiveRegex = regexp.MustCompile(`(?i)(password|pass|secret|uuid|token|pbk|sid)[=:\s"]+([^\s,"]+)`)
+)
+
+func sanitizeError(errStr string) string {
+	return sensitiveRegex.ReplaceAllString(errStr, "$1=***")
+}
 
 type ipAPIResponse struct {
 	Status      string `json:"status"`
@@ -26,8 +37,51 @@ type ipifyResponse struct {
 	IP string `json:"ip"`
 }
 
-// TestProxy runs an ephemeral sing-box instance to test the given proxy.
+// TestOptions configures ephemeral proxy testing environment.
+type TestOptions struct {
+	SingboxPath string
+	VethIF      string
+	ContainerGW string
+}
+
+// BoundedBuffer thread-safely captures output up to a maximum size.
+type boundedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+	max int
+}
+
+func (b *boundedBuffer) Write(p []byte) (n int, err error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.buf.Len() >= b.max {
+		return len(p), nil
+	}
+	remaining := b.max - b.buf.Len()
+	if len(p) > remaining {
+		b.buf.Write(p[:remaining])
+	} else {
+		b.buf.Write(p)
+	}
+	return len(p), nil
+}
+
+func (b *boundedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// TestProxy runs an ephemeral sing-box instance to test the given proxy (compatibility wrapper).
 func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, error) {
+	return TestProxyWithOptions(ctx, p, TestOptions{
+		SingboxPath: singboxPath,
+	})
+}
+
+// TestProxyWithOptions runs an ephemeral sing-box instance to test the given proxy with specified options.
+func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*TestResult, error) {
+	singboxPath := opts.SingboxPath
 	if singboxPath == "" {
 		singboxPath = "sing-box"
 	}
@@ -41,6 +95,18 @@ func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, 
 	_ = listener.Close()
 
 	// 2. Build minimal sing-box ephemeral config
+	outbound := p.ToSingboxOutbound("proxy")
+	if opts.VethIF != "" {
+		outbound["bind_interface"] = opts.VethIF
+	}
+
+	routeCfg := map[string]interface{}{
+		"final": "proxy",
+	}
+	if opts.VethIF != "" {
+		routeCfg["default_interface"] = opts.VethIF
+	}
+
 	cfg := map[string]interface{}{
 		"log": map[string]interface{}{
 			"level": "warn",
@@ -54,12 +120,27 @@ func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, 
 			},
 		},
 		"outbounds": []interface{}{
-			p.ToSingboxOutbound("proxy"),
-		},
-		"route": map[string]interface{}{
-			"final": "proxy",
+			outbound,
 		},
 	}
+
+	if opts.ContainerGW != "" {
+		cfg["dns"] = map[string]interface{}{
+			"servers": []interface{}{
+				map[string]interface{}{
+					"tag":         "dns-bootstrap",
+					"type":        "udp",
+					"server":      opts.ContainerGW,
+					"server_port": 53,
+				},
+			},
+			"final":    "dns-bootstrap",
+			"strategy": "ipv4_only",
+		}
+		routeCfg["default_domain_resolver"] = "dns-bootstrap"
+	}
+
+	cfg["route"] = routeCfg
 
 	cfgBytes, err := json.Marshal(cfg)
 	if err != nil {
@@ -84,59 +165,93 @@ func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, 
 	if out, err := checkCmd.CombinedOutput(); err != nil {
 		res := &TestResult{
 			Status:   "error",
-			Error:    fmt.Sprintf("sing-box check failed: %s", string(out)),
+			Error:    sanitizeError(fmt.Sprintf("sing-box check failed: %s", string(out))),
 			TestedAt: time.Now(),
 		}
 		p.LastTest = res
 		return res, nil
 	}
 
-	// 4. Start child process
-	runCtx, cancelRun := context.WithTimeout(ctx, 15*time.Second)
+	// 4. Start child process with captured stderr
+	runCtx, cancelRun := context.WithTimeout(ctx, 22*time.Second)
 	defer cancelRun()
 
 	runCmd := exec.CommandContext(runCtx, singboxPath, "run", "-c", tmpPath)
+	stderrBuf := &boundedBuffer{max: 4096}
+	runCmd.Stderr = stderrBuf
+
+	procExited := make(chan error, 1)
+
 	if err := runCmd.Start(); err != nil {
 		res := &TestResult{
 			Status:   "error",
-			Error:    fmt.Sprintf("failed to start test sing-box: %v", err),
+			Error:    sanitizeError(fmt.Sprintf("failed to start test sing-box: %v", err)),
 			TestedAt: time.Now(),
 		}
 		p.LastTest = res
 		return res, nil
 	}
+
+	go func() {
+		procExited <- runCmd.Wait()
+	}()
 
 	defer func() {
 		if runCmd.Process != nil {
 			_ = runCmd.Process.Kill()
-			_ = runCmd.Wait()
+		}
+		select {
+		case <-procExited:
+		case <-time.After(1 * time.Second):
 		}
 	}()
 
-	// 5. Poll until local proxy port is open
+	// 5. Poll until local proxy port is open (60 * 100ms = 6.0s)
 	proxyAddr := fmt.Sprintf("127.0.0.1:%d", port)
 	ready := false
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 60; i++ {
+		// Check if process exited early
+		select {
+		case exitErr := <-procExited:
+			stderrMsg := strings.TrimSpace(stderrBuf.String())
+			if stderrMsg == "" && exitErr != nil {
+				stderrMsg = exitErr.Error()
+			}
+			res := &TestResult{
+				Status:   "error",
+				Error:    sanitizeError(fmt.Sprintf("test sing-box exited prematurely: %s", stderrMsg)),
+				TestedAt: time.Now(),
+			}
+			p.LastTest = res
+			return res, nil
+		default:
+		}
+
 		conn, err := net.DialTimeout("tcp", proxyAddr, 100*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
 			ready = true
 			break
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	if !ready {
+		stderrMsg := strings.TrimSpace(stderrBuf.String())
+		errMsg := "test sing-box failed to bind to port in time"
+		if stderrMsg != "" {
+			errMsg = fmt.Sprintf("%s: %s", errMsg, stderrMsg)
+		}
 		res := &TestResult{
 			Status:   "error",
-			Error:    "test sing-box failed to bind to port in time",
+			Error:    sanitizeError(errMsg),
 			TestedAt: time.Now(),
 		}
 		p.LastTest = res
 		return res, nil
 	}
 
-	// 6. Connect through proxy with 10s timeout
+	// 6. Connect through proxy with 10s HTTP timeout
 	proxyURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", port))
 	httpClient := &http.Client{
 		Transport: &http.Transport{
@@ -145,13 +260,15 @@ func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, 
 		Timeout: 10 * time.Second,
 	}
 
+	var lastErr string
+
 	start := time.Now()
 	// Try ip-api.com first
 	req, err := http.NewRequestWithContext(runCtx, http.MethodGet, "http://ip-api.com/json/?fields=status,country,countryCode,city,isp,query", nil)
 	if err != nil {
 		res := &TestResult{
 			Status:   "error",
-			Error:    err.Error(),
+			Error:    sanitizeError(err.Error()),
 			TestedAt: time.Now(),
 		}
 		p.LastTest = res
@@ -178,6 +295,13 @@ func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, 
 			p.LastTest = res
 			return res, nil
 		}
+		if apiResp.Status != "success" && apiResp.Status != "" {
+			lastErr = fmt.Sprintf("ip-api returned status %s", apiResp.Status)
+		}
+	} else if err != nil {
+		lastErr = err.Error()
+	} else {
+		lastErr = fmt.Sprintf("ip-api returned HTTP %d", resp.StatusCode)
 	}
 	if resp != nil {
 		_ = resp.Body.Close()
@@ -202,15 +326,26 @@ func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, 
 				p.LastTest = res
 				return res, nil
 			}
+			lastErr = "invalid response from api.ipify.org"
+		} else if err2 != nil {
+			lastErr = err2.Error()
+		} else {
+			lastErr = fmt.Sprintf("api.ipify.org returned HTTP %d", resp2.StatusCode)
 		}
 		if resp2 != nil {
 			_ = resp2.Body.Close()
 		}
+	} else {
+		lastErr = err.Error()
+	}
+
+	if lastErr == "" {
+		lastErr = "connection failed or timed out"
 	}
 
 	res := &TestResult{
 		Status:   "error",
-		Error:    errors.New("connection failed or timed out").Error(),
+		Error:    sanitizeError(lastErr),
 		TestedAt: time.Now(),
 	}
 	p.LastTest = res

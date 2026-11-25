@@ -430,10 +430,15 @@ func (s *Server) handleProxyByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(parts) == 2 && parts[1] == "test" && r.Method == http.MethodPost {
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 		defer cancel()
 
-		res, err := proxy.TestProxy(ctx, p, s.cfg.SingboxPath)
+		testOpts := proxy.TestOptions{
+			SingboxPath: s.cfg.SingboxPath,
+			VethIF:      s.cfg.VethIF,
+			ContainerGW: s.cfg.ContainerGW,
+		}
+		res, err := proxy.TestProxyWithOptions(ctx, p, testOpts)
 		if err != nil {
 			s.jsonError(w, http.StatusInternalServerError, err.Error())
 			return
