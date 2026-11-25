@@ -20,6 +20,31 @@
 
 > **Состояние проекта:** подходит для домашних сетей и небольших офисов, где LAN считается доверенной. Аудит от 2026-11-25 устранил в коде слабые места этапа 1. Некоторые вопросы ещё открыты (панель работает по обычному HTTP, устройства могут сами сменить IP или MAC, периодического мониторинга пока нет). Перед развёртыванием прочитайте [docs/security.md](docs/security.md).
 
+## Скриншоты
+
+<p align="center">
+  <img src="docs/screenshots/overview-light.png" alt="Обзор: состояние защиты и маршрут каждого устройства" width="100%">
+  <br><sub>Обзор: состояние защиты и маршрут каждого устройства</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/leakguard-dark.png" alt="Защита от утечек: шесть уровней"><br><sub>Защита от утечек: шесть уровней</sub></td>
+    <td width="50%"><img src="docs/screenshots/proxies-light.png" alt="Прокси: результаты проверки, выходной IP и задержка"><br><sub>Прокси: результаты проверки, выходной IP и задержка</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/overview-dark.png" alt="Обзор в тёмной теме"><br><sub>Обзор в тёмной теме</sub></td>
+    <td width="50%"><img src="docs/screenshots/login-light.png" alt="Страница входа"><br><sub>Страница входа</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-dark.png" alt="Мобильная версия" width="300">
+  <br><sub>Мобильная версия</sub>
+</p>
+
+На всех скриншотах демонстрационные данные (IP-диапазоны для документации, хосты `example.com`).
+
 ## Документация
 
 | Документ | Когда читать |

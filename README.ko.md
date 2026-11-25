@@ -20,6 +20,31 @@ MikroTik RouterOS 7용 기기별 프록시 라우팅 및 IP 유출 방지 도구
 
 > **프로젝트 상태:** LAN을 신뢰할 수 있는 가정 및 소규모 사무실 네트워크에 적합합니다. 2026-11-25 검토에서 1단계 약점을 코드에서 수정했습니다. 일부 항목은 아직 해결되지 않았습니다(대시보드가 일반 HTTP로 제공됨, 스스로 IP나 MAC을 바꾸는 기기, 아직 주기적 모니터링 없음). 배포하기 전에 [docs/security.md](docs/security.md)를 읽어 보세요.
 
+## 스크린샷
+
+<p align="center">
+  <img src="docs/screenshots/overview-light.png" alt="개요: 보호 상태와 각 기기의 경로" width="100%">
+  <br><sub>개요: 보호 상태와 각 기기의 경로</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/leakguard-dark.png" alt="유출 방지: 6개 보호 계층"><br><sub>유출 방지: 6개 보호 계층</sub></td>
+    <td width="50%"><img src="docs/screenshots/proxies-light.png" alt="프록시: 테스트 결과, 출구 IP, 지연 시간"><br><sub>프록시: 테스트 결과, 출구 IP, 지연 시간</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/overview-dark.png" alt="다크 모드의 개요"><br><sub>다크 모드의 개요</sub></td>
+    <td width="50%"><img src="docs/screenshots/login-light.png" alt="로그인 페이지"><br><sub>로그인 페이지</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-dark.png" alt="모바일 레이아웃" width="300">
+  <br><sub>모바일 레이아웃</sub>
+</p>
+
+모든 스크린샷은 데모 데이터(문서용 IP 대역, `example.com` 호스트)를 사용합니다.
+
 ## 문서
 
 | 문서 | 읽어야 할 때 |

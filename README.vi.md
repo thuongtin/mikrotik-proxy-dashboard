@@ -20,6 +20,31 @@ Mục tiêu: khi một thiết bị đã được gán proxy, thiết bị đó 
 
 > **Tình trạng dự án:** phù hợp cho mạng gia đình và văn phòng nhỏ, nơi mạng LAN là tin cậy. Đợt rà soát ngày 2026-11-25 đã vá các điểm yếu giai đoạn 1 trong code. Một số việc vẫn còn mở (dashboard chạy HTTP thường, thiết bị tự đổi IP hoặc MAC, chưa có giám sát định kỳ). Đọc [docs/vi/security.md](docs/vi/security.md) trước khi triển khai.
 
+## Ảnh chụp màn hình
+
+<p align="center">
+  <img src="docs/screenshots/overview-light.png" alt="Tổng quan: trạng thái bảo vệ và đường đi của từng thiết bị" width="100%">
+  <br><sub>Tổng quan: trạng thái bảo vệ và đường đi của từng thiết bị</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/leakguard-dark.png" alt="Chống rò rỉ: sáu lớp bảo vệ"><br><sub>Chống rò rỉ: sáu lớp bảo vệ</sub></td>
+    <td width="50%"><img src="docs/screenshots/proxies-light.png" alt="Proxy: kết quả kiểm tra, IP thoát và độ trễ"><br><sub>Proxy: kết quả kiểm tra, IP thoát và độ trễ</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/overview-dark.png" alt="Tổng quan ở chế độ tối"><br><sub>Tổng quan ở chế độ tối</sub></td>
+    <td width="50%"><img src="docs/screenshots/login-light.png" alt="Trang đăng nhập"><br><sub>Trang đăng nhập</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-dark.png" alt="Giao diện điện thoại" width="300">
+  <br><sub>Giao diện điện thoại</sub>
+</p>
+
+Mọi ảnh chụp đều dùng dữ liệu demo (dải IP dành cho tài liệu, host `example.com`).
+
 ## Tài liệu
 
 | Tài liệu | Đọc khi |

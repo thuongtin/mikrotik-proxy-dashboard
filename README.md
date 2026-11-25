@@ -20,6 +20,31 @@ The goal: once a device is assigned a proxy, it can only reach the Internet thro
 
 > **Project status:** suitable for home and small office networks where the LAN is trusted. A review on 2026-11-25 fixed the phase 1 weaknesses in code. Some items are still open (the dashboard is served over plain HTTP, devices that change their own IP or MAC, no periodic monitoring yet). Read [docs/security.md](docs/security.md) before deploying.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/overview-light.png" alt="Overview: protection status and the route of every device" width="100%">
+  <br><sub>Overview: protection status and the route of every device</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/leakguard-dark.png" alt="Leak protection: the six layers"><br><sub>Leak protection: the six layers</sub></td>
+    <td width="50%"><img src="docs/screenshots/proxies-light.png" alt="Proxies: test results, exit IP and latency"><br><sub>Proxies: test results, exit IP and latency</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/overview-dark.png" alt="Overview in dark mode"><br><sub>Overview in dark mode</sub></td>
+    <td width="50%"><img src="docs/screenshots/login-light.png" alt="Sign-in page"><br><sub>Sign-in page</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-dark.png" alt="Mobile layout" width="300">
+  <br><sub>Mobile layout</sub>
+</p>
+
+All screenshots use demo data (documentation IP ranges, `example.com` hosts).
+
 ## Documentation
 
 | Document | Read it when |

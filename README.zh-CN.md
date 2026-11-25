@@ -20,6 +20,31 @@ Dashboard 运行在路由器上的 `linux/arm64` 容器中（实际使用环境�
 
 > **项目状态：** 适用于局域网可信的家庭和小型办公网络。2026-11-25 的一次审查已在代码中修复了第 1 阶段的薄弱点。仍有一些问题尚未解决（Dashboard 通过明文 HTTP 提供服务、设备自行更改 IP 或 MAC、尚无定期监控）。部署前请阅读 [docs/security.md](docs/security.md)。
 
+## 截图
+
+<p align="center">
+  <img src="docs/screenshots/overview-light.png" alt="概览：防护状态以及每台设备的路由" width="100%">
+  <br><sub>概览：防护状态以及每台设备的路由</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/leakguard-dark.png" alt="防泄漏：六层防护"><br><sub>防泄漏：六层防护</sub></td>
+    <td width="50%"><img src="docs/screenshots/proxies-light.png" alt="代理：测试结果、出口 IP 和延迟"><br><sub>代理：测试结果、出口 IP 和延迟</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/overview-dark.png" alt="深色模式下的概览"><br><sub>深色模式下的概览</sub></td>
+    <td width="50%"><img src="docs/screenshots/login-light.png" alt="登录页"><br><sub>登录页</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/screenshots/mobile-dark.png" alt="手机布局" width="300">
+  <br><sub>手机布局</sub>
+</p>
+
+所有截图均使用演示数据（文档专用 IP 段，`example.com` 主机）。
+
 ## 文档
 
 | 文档 | 何时阅读 |
