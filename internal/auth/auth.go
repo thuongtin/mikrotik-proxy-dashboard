@@ -21,7 +21,15 @@ import (
 
 const (
 	SessionCookieName = "proxy_dash_session"
-	SessionDuration   = 24 * time.Hour
+	// SessionIdleTimeout ends a session that has not been used for this long.
+	SessionIdleTimeout = 7 * 24 * time.Hour
+	// SessionMaxLifetime ends every session this long after sign-in, used or not.
+	SessionMaxLifetime = 30 * 24 * time.Hour
+	// sessionRenewAfter is how old a token gets before a request replaces it
+	// with a fresh one, which keeps a session in use from timing out.
+	sessionRenewAfter = time.Hour
+	// sessionClockSkew is how far in the future a token may claim to be issued.
+	sessionClockSkew = 5 * time.Minute
 )
 
 var (
@@ -59,6 +67,7 @@ type AuthManager struct {
 	passwordHash string
 	sessionKey   []byte
 	limiter      *RateLimiter
+	now          func() time.Time
 }
 
 // NewAuthManager initializes AuthManager, loading or generating session signing key.
@@ -77,6 +86,7 @@ func NewAuthManager(dataDir, passwordHash string) (*AuthManager, error) {
 		passwordHash: strings.TrimSpace(passwordHash),
 		sessionKey:   sessionKey,
 		limiter:      NewRateLimiter(5, 60*time.Second, 5*time.Minute),
+		now:          time.Now,
 	}, nil
 }
 
@@ -129,22 +139,32 @@ func (a *AuthManager) Login(password, clientIP string) (*http.Cookie, error) {
 	return a.CreateSessionCookie(), nil
 }
 
-// CreateSessionCookie generates a signed session cookie.
+// CreateSessionCookie generates a signed session cookie for a new sign-in.
 func (a *AuthManager) CreateSessionCookie() *http.Cookie {
+	now := a.now()
+	return a.sessionCookie(now, now)
+}
+
+// sessionCookie signs a token issued at now for a session that signed in at
+// loginAt. The payload is "issued:login:nonce". The cookie lives until the
+// idle timeout or the end of the session's lifetime, whichever comes first.
+func (a *AuthManager) sessionCookie(loginAt, now time.Time) *http.Cookie {
 	nonce := make([]byte, 16)
 	_, _ = rand.Read(nonce)
 
-	timestamp := time.Now().Unix()
-	payload := fmt.Sprintf("%d:%s", timestamp, hex.EncodeToString(nonce))
-	sig := a.sign(payload)
-	val := fmt.Sprintf("%s.%s", payload, sig)
+	payload := fmt.Sprintf("%d:%d:%s", now.Unix(), loginAt.Unix(), hex.EncodeToString(nonce))
+	val := fmt.Sprintf("%s.%s", payload, a.sign(payload))
 
+	expires := now.Add(SessionIdleTimeout)
+	if end := loginAt.Add(SessionMaxLifetime); end.Before(expires) {
+		expires = end
+	}
 	return &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    val,
 		Path:     "/",
-		Expires:  time.Now().Add(SessionDuration),
-		MaxAge:   int(SessionDuration.Seconds()),
+		Expires:  expires,
+		MaxAge:   max(int(expires.Sub(now).Seconds()), 1),
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 	}
@@ -165,45 +185,71 @@ func (a *AuthManager) ClearSessionCookie() *http.Cookie {
 
 // VerifyRequest validates the session cookie from incoming HTTP request.
 func (a *AuthManager) VerifyRequest(r *http.Request) bool {
+	ok, _ := a.Authenticate(r)
+	return ok
+}
+
+// Authenticate validates the session cookie of a request. For a valid token
+// older than sessionRenewAfter it also returns a fresh cookie for the same
+// session, so a dashboard in use stays signed in until SessionMaxLifetime.
+// renewed is nil when the token is invalid or still fresh.
+func (a *AuthManager) Authenticate(r *http.Request) (ok bool, renewed *http.Cookie) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil || cookie.Value == "" {
-		return false
+		return false, nil
 	}
-	return a.VerifyToken(cookie.Value)
+	now := a.now()
+	issuedAt, loginAt, ok := a.parseToken(cookie.Value, now)
+	if !ok {
+		return false, nil
+	}
+	if now.Sub(issuedAt) >= sessionRenewAfter {
+		renewed = a.sessionCookie(loginAt, now)
+	}
+	return true, renewed
 }
 
 // VerifyToken validates the payload and HMAC-SHA256 signature.
 func (a *AuthManager) VerifyToken(token string) bool {
-	parts := strings.Split(token, ".")
-	if len(parts) != 2 {
-		return false
+	_, _, ok := a.parseToken(token, a.now())
+	return ok
+}
+
+// parseToken checks the signature and the age of a token and returns when it
+// was issued and when its session signed in. Tokens from before session
+// renewal carry "issued:nonce"; their sign-in time is their issue time.
+func (a *AuthManager) parseToken(token string, now time.Time) (issuedAt, loginAt time.Time, ok bool) {
+	payload, signature, found := strings.Cut(token, ".")
+	if !found || strings.Contains(signature, ".") {
+		return time.Time{}, time.Time{}, false
+	}
+	if subtle.ConstantTimeCompare([]byte(signature), []byte(a.sign(payload))) != 1 {
+		return time.Time{}, time.Time{}, false
 	}
 
-	payload := parts[0]
-	signature := parts[1]
-
-	expectedSig := a.sign(payload)
-	if subtle.ConstantTimeCompare([]byte(signature), []byte(expectedSig)) != 1 {
-		return false
+	parts := strings.Split(payload, ":")
+	if len(parts) != 2 && len(parts) != 3 {
+		return time.Time{}, time.Time{}, false
 	}
-
-	// Validate timestamp inside payload
-	payloadParts := strings.Split(payload, ":")
-	if len(payloadParts) < 2 {
-		return false
-	}
-
-	ts, err := strconv.ParseInt(payloadParts[0], 10, 64)
+	issued, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return false
+		return time.Time{}, time.Time{}, false
 	}
-
-	issuedAt := time.Unix(ts, 0)
-	if time.Since(issuedAt) > SessionDuration || issuedAt.After(time.Now().Add(5*time.Minute)) {
-		return false
+	login := issued
+	if len(parts) == 3 {
+		if login, err = strconv.ParseInt(parts[1], 10, 64); err != nil {
+			return time.Time{}, time.Time{}, false
+		}
 	}
+	issuedAt, loginAt = time.Unix(issued, 0), time.Unix(login, 0)
 
-	return true
+	switch {
+	case issuedAt.After(now.Add(sessionClockSkew)), loginAt.After(issuedAt):
+		return time.Time{}, time.Time{}, false
+	case now.Sub(issuedAt) > SessionIdleTimeout, now.Sub(loginAt) > SessionMaxLifetime:
+		return time.Time{}, time.Time{}, false
+	}
+	return issuedAt, loginAt, true
 }
 
 func (a *AuthManager) sign(payload string) string {

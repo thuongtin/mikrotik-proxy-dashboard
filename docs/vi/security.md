@@ -81,7 +81,7 @@ Proxy đang được gán không xóa được nữa: API trả 409 kèm danh s�
 *Còn lại:* `MIKROTIK_USER` mặc định vẫn là `admin`; việc dùng tài khoản quyền hẹp mới chỉ là hướng dẫn trong [routeros-setup.md](routeros-setup.md).
 
 **M5. Dashboard HTTP thuần, phiên không thu hồi được. Còn mở (giai đoạn 2).**
-Mật khẩu và cookie đi dạng rõ trong LAN. Cookie không có cờ `Secure`. Phiên là token tự ký sống 24 giờ; đăng xuất hay đổi mật khẩu không vô hiệu được token đã cấp.
+Mật khẩu và cookie đi dạng rõ trong LAN. Cookie không có cờ `Secure`. Phiên là token tự ký, được gia hạn khi dashboard đang dùng, hết hạn sau 7 ngày không dùng và chậm nhất 30 ngày sau khi đăng nhập; đăng xuất hay đổi mật khẩu không vô hiệu được token đã cấp.
 *Hướng vá:* hỗ trợ TLS; lưu phiên phía server để thu hồi được; đổi mật khẩu thì hủy mọi phiên.
 
 **M6. API trả mật khẩu proxy về trình duyệt. Đã vá.**

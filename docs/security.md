@@ -81,7 +81,7 @@ An assigned proxy can no longer be deleted: the API returns 409 with the list of
 *Remaining:* `MIKROTIK_USER` still defaults to `admin`; using a narrow-permission account is so far only a recommendation in [routeros-setup.md](routeros-setup.md).
 
 **M5. The dashboard uses plain HTTP and sessions cannot be revoked. Open (phase 2).**
-The password and cookie travel in cleartext on the LAN. The cookie has no `Secure` flag. A session is a self-signed token valid for 24 hours; logging out or changing the password does not invalidate tokens already issued.
+The password and cookie travel in cleartext on the LAN. The cookie has no `Secure` flag. A session is a self-signed token. It is renewed while the dashboard is in use, ends after 7 days without use and at the latest 30 days after sign-in; logging out or changing the password does not invalidate tokens already issued.
 *Planned fix:* TLS support; server-side session storage so sessions can be revoked; changing the password revokes every session.
 
 **M6. The API returned proxy passwords to the browser. Fixed.**

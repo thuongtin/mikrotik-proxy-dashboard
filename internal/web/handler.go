@@ -187,12 +187,22 @@ func (s *Server) routes() {
 
 func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.authMgr.VerifyRequest(r) {
+		if !s.authenticate(w, r) {
 			s.jsonError(w, http.StatusUnauthorized, i18n.FromRequest(r).T("api.unauthorized"))
 			return
 		}
 		next(w, r)
 	}
+}
+
+// authenticate checks the session cookie and, when the token is due for
+// renewal, sends a fresh one so a session in use does not time out.
+func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) bool {
+	ok, renewed := s.authMgr.Authenticate(r)
+	if renewed != nil {
+		http.SetCookie(w, renewed)
+	}
+	return ok
 }
 
 // requireRouter answers 503 when the RouterOS client could not be created at
@@ -354,7 +364,7 @@ func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		s.methodNotAllowed(w, r, http.MethodGet)
 		return
 	}
-	authenticated := s.authMgr.VerifyRequest(r)
+	authenticated := s.authenticate(w, r)
 	s.json(w, http.StatusOK, map[string]bool{"authenticated": authenticated})
 }
 
