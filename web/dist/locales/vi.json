@@ -359,6 +359,7 @@
   "route.applying": "Đang áp dụng...",
   "route.pickAgain": "Proxy của thiết bị đã bị xóa. Hãy chọn tuyến mới.",
   "route.testing": "Đang kiểm tra...",
+  "route.checkingExit": "Đang kiểm tra IP thoát...",
   "route.notTested": "Chưa kiểm tra, chưa rõ quốc gia",
   "route.failed": "Proxy đang lỗi, lưu lượng bị chặn",
   "route.via": "qua {name} · {ms} ms",

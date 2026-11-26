@@ -160,6 +160,14 @@ func (p *Proxy) ToSingboxOutbound(tag string) map[string]interface{} {
 			out["tls"] = tls
 		}
 		applyTransport(out, p)
+
+	default:
+		if p.IsTunnel() {
+			// The tunnel is run by the dashboard. sing-box only binds the
+			// outbound to its interface; without the interface, dials fail.
+			out["type"] = "direct"
+			out["bind_interface"] = p.TunnelInterface()
+		}
 	}
 
 	return out

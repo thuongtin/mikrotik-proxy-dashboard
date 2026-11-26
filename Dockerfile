@@ -26,21 +26,26 @@ COPY . .
 FROM source AS check
 ARG GOVULNCHECK_VERSION=v1.10.0
 ARG SKIP_VULNCHECK=0
+# Go build tags of the edition (see scripts/build-arm64-tar.sh); empty for
+# the default build.
+ARG GO_BUILD_TAGS=""
 COPY --from=singbox /usr/local/bin/sing-box /usr/local/bin/sing-box
-RUN CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...
+RUN CGO_ENABLED=0 go vet -tags "$GO_BUILD_TAGS" ./... && \
+    CGO_ENABLED=0 go test -tags "$GO_BUILD_TAGS" ./...
 RUN if [ "$SKIP_VULNCHECK" = "1" ]; then \
         echo "WARNING: SKIP_VULNCHECK=1, govulncheck skipped" >&2; \
     else \
-        go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" ./...; \
+        go run "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}" -tags "$GO_BUILD_TAGS" ./...; \
     fi
 
 # Stage 1: Build Go static binary and compress binaries
 FROM source AS builder
+ARG GO_BUILD_TAGS=""
 
 RUN apk add --no-cache upx
 
 # Build for linux/arm64
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /app/proxy-dash .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -tags "$GO_BUILD_TAGS" -trimpath -ldflags="-s -w" -o /app/proxy-dash .
 RUN upx -9 /app/proxy-dash || true
 
 # Copy and compress official sing-box binary
@@ -49,6 +54,8 @@ RUN upx -9 /app/sing-box || true
 
 # Stage 2: Minimal ARM64 runtime image
 FROM ${RUNTIME_IMAGE}
+# Extra Alpine packages an edition needs at runtime; empty by default.
+ARG EXTRA_APK_PACKAGES=""
 
 # Install runtime networking utilities and certificates.
 # iptables (nft backend) and iptables-legacy are both needed: entrypoint.sh
@@ -59,6 +66,7 @@ RUN apk add --no-cache \
     iproute2 \
     iptables \
     iptables-legacy \
+    $EXTRA_APK_PACKAGES \
     && rm -rf /var/cache/apk/*
 
 # Copy compressed binaries
@@ -79,4 +87,7 @@ ENV LISTEN_ADDR=":8080" \
 VOLUME ["/data"]
 EXPOSE 8080 53/udp 53/tcp
 
+# entrypoint.sh stays PID 1: it traps SIGTERM (RouterOS kills a PID 1 that
+# does not catch it, without waiting for stop-time), forwards it to proxy-dash
+# and reaps orphaned processes. Do not put tini in front of it.
 ENTRYPOINT ["/entrypoint.sh"]

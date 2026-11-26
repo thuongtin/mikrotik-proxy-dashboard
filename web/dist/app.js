@@ -246,6 +246,62 @@
 
   const proxyById = (id) => state.proxies.find((p) => p.id === id) || null;
 
+  // ---------------------------------------------------------------------------
+  // Extensions
+  // ---------------------------------------------------------------------------
+  // An edition can ship extra scripts under ext/; the server adds them to the
+  // page after this one. Each calls PGW.register(fn) while the page loads. At
+  // boot fn(host) gets the helpers below and returns hooks. Its "protocols"
+  // map a protocol name to a kind that tells the core how to show, test and
+  // edit profiles of that protocol.
+
+  const registered = [];
+  const exts = [];
+  const kinds = {};
+  window.PGW = { register: (fn) => { if (typeof fn === "function") registered.push(fn); } };
+
+  const kindOf = (p) => (p && kinds[p.protocol]) || null;
+  const protoLabel = (proto) => PROTO_LABEL[proto] || (kinds[proto] && kinds[proto].label) || proto;
+
+  // extCall runs one hook on every extension. A broken extension must not
+  // take the core page down with it.
+  function extCall(name, arg) {
+    for (const x of exts) {
+      if (typeof x[name] !== "function") continue;
+      try { x[name](arg); } catch (e) { console.error("extension hook " + name + " failed", e); }
+    }
+  }
+
+  const READY = { ready: true };
+
+  // kindStatus tells whether a profile can carry traffic now:
+  // {ready, tone, text, busy, problem, testBlocked}. Plain proxies always can.
+  function kindStatus(p) {
+    const k = kindOf(p);
+    if (!k || typeof k.status !== "function") return READY;
+    try { return k.status(p) || READY; } catch (e) { console.error(e); return READY; }
+  }
+
+  // What the profile points at: host:port, or what its kind says.
+  function proxyAddr(p) {
+    const k = kindOf(p);
+    if (k && typeof k.addr === "function") return k.addr(p);
+    return p.host + ":" + p.port;
+  }
+
+  function pName(p) {
+    return p.name || proxyAddr(p);
+  }
+
+  // Flag for a proxy: the tested exit, else the country its kind names.
+  function proxyFlag(p, big) {
+    const lt = p && p.lastTest;
+    if (lt && lt.status === "ok") return flagEl(lt, big);
+    const k = kindOf(p);
+    const cc = k && typeof k.flagCountry === "function" ? k.flagCountry(p) : "";
+    return flagEl(cc ? { countryCode: cc } : null, big);
+  }
+
   function deviceName(d) {
     return d.nickname || d.hostname || d.comment || d.ip;
   }
@@ -296,7 +352,7 @@
 
   function proxyLabel(p) {
     const f = proxyOk(p) ? flagEmoji(p.lastTest.countryCode) : "";
-    let label = (f ? f + " " : "") + (p.name || p.host + ":" + p.port);
+    let label = (f ? f + " " : "") + pName(p);
     const lt = p.lastTest;
     if (lt && lt.status === "ok" && lt.latencyMs) label += " · " + fmtNum(lt.latencyMs) + " ms";
     else if (lt && lt.status && lt.status !== "ok") label = t("proxy.labelFailed", { label: label });
@@ -365,12 +421,13 @@
 
   // Click on the backdrop closes the dialog (the dialog element itself is the
   // target only when the click lands outside its content box).
-  document.querySelectorAll("dialog").forEach((dlg) => {
+  function wireBackdrop(dlg) {
     dlg.addEventListener("mousedown", (e) => { dlg._downOnBackdrop = e.target === dlg; });
     dlg.addEventListener("click", (e) => {
       if (e.target === dlg && dlg._downOnBackdrop && dlg.id !== "dlg-confirm") closeDialog(dlg);
     });
-  });
+  }
+  document.querySelectorAll("dialog").forEach(wireBackdrop);
 
   // Confirm dialog returning a Promise<boolean>.
   let confirmResolve = null;
@@ -614,9 +671,10 @@
     btn.classList.add("is-spinning");
     if (userInitiated) setBusy(btn, true);
     try {
-      const jobs = [load("status", "/api/system/status"), load("devices", "/api/devices"), load("proxies", "/api/proxies")];
+      const jobs = [load("status", "/api/system/status"), load("devices", "/api/devices"), load("proxies", "/api/proxies")].concat(extLoads());
       if (state.view === "logs") jobs.push(load("logs", "/api/system/logs"));
       const results = await Promise.all(jobs);
+      await extAfterLoad();
       if (results.every(Boolean)) state.lastUpdated = new Date();
       renderAll();
       if (userInitiated) {
@@ -637,6 +695,62 @@
     }
   }
 
+  // Extension data loads alongside the core data. A 401 still ends the
+  // session; any other failure only marks the refresh partial.
+  function extLoads() {
+    return exts.filter((x) => typeof x.load === "function").map((x) =>
+      Promise.resolve().then(() => x.load()).then((ok) => ok !== false, (e) => {
+        if (e && e.status === 401) throw e;
+        console.error("extension load failed", e);
+        return false;
+      }));
+  }
+
+  async function extAfterLoad() {
+    for (const x of exts) {
+      if (typeof x.afterLoad !== "function") continue;
+      try { await x.afterLoad(); } catch (e) {
+        if (e && e.status === 401) throw e;
+        console.error("extension afterLoad failed", e);
+      }
+    }
+  }
+
+  // tablesInUse reports the user working on the proxy or device rows: a
+  // select or button there has focus, a row is busy, or a dialog will hand
+  // focus back to a row button. Replacing the rows then closes the select or
+  // drops the focus.
+  function tablesInUse() {
+    if (anyDialogOpen() || state.busyIps.size > 0) return true;
+    const a = document.activeElement;
+    return !!(a && a.closest && a.closest("tbody, #devices-body") && (a.tagName === "SELECT" || a.tagName === "BUTTON"));
+  }
+
+  // Updates that arrive every few seconds (an extension polling its status)
+  // wait until the rows are free instead of being dropped.
+  let tablesStale = false;
+  function renderTablesWhenFree() {
+    if (tablesInUse()) { tablesStale = true; return; }
+    tablesStale = false;
+    renderProxies();
+    if (state.loaded.devices) renderDevices();
+  }
+  function flushTables() {
+    if (tablesStale) setTimeout(() => { if (tablesStale) renderTablesWhenFree(); }, 0);
+  }
+  document.addEventListener("focusout", flushTables);
+  document.querySelectorAll("dialog").forEach((dlg) => dlg.addEventListener("close", flushTables));
+
+  // A dialog an extension inserts after load gets the same wiring as the
+  // dialogs in the page: backdrop click closes it, and closing it lets the
+  // tables catch up.
+  function adoptDialog(dlg) {
+    if (!dlg || dlg._adopted) return;
+    dlg._adopted = true;
+    wireBackdrop(dlg);
+    dlg.addEventListener("close", flushTables);
+  }
+
   function firstLoadError() {
     for (const k of Object.keys(state.loadError)) if (state.loadError[k]) return state.loadError[k].message;
     return "";
@@ -655,12 +769,8 @@
   }
 
   function canAutoRefresh() {
-    if (document.hidden) return false;
-    if (anyDialogOpen()) return false;
-    if (state.busyIps.size > 0 || state.testing.size > 0) return false;
-    const a = document.activeElement;
-    if (a && a.closest && a.closest("tbody, #devices-body") && (a.tagName === "SELECT" || a.tagName === "BUTTON")) return false;
-    return true;
+    if (document.hidden || state.testing.size > 0) return false;
+    return !tablesInUse();
   }
 
   function startRefresh() {
@@ -677,7 +787,11 @@
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && !$("app-view").hidden && state.lastUpdated && Date.now() - state.lastUpdated.getTime() > REFRESH_MS && canAutoRefresh()) {
+    if (document.hidden || $("app-view").hidden) return;
+    // Extensions that poll stop while the page is hidden. They restart here:
+    // the regular refresh below is skipped while a dialog is open.
+    extCall("onVisible");
+    if (state.lastUpdated && Date.now() - state.lastUpdated.getTime() > REFRESH_MS && canAutoRefresh()) {
       refreshAll(false);
     }
   });
@@ -763,10 +877,11 @@
         items.push({ tone: info.tone, icon: "shield-alert", title: t(info.tone === "bad" ? "attention.layerError" : "attention.layerWarning", { num: String(info.num), title: info.title }), text: layer.details || layer.description || "", action: { label: t("attention.details"), run: () => { location.hash = "#leakguard"; } } });
       }
     });
+    extCall("attention", items);
     const badProxies = state.proxies.filter((p) => p.lastTest && p.lastTest.status && p.lastTest.status !== "ok" && devicesUsing(p.id).length > 0);
     badProxies.forEach((p) => {
       const n = devicesUsing(p.id).length;
-      items.push({ tone: "warn", icon: "globe", title: t("attention.proxyFailed.title", { name: p.name || p.host }), text: (t("attention.proxyFailed.text", { count: n }) + " " + (p.lastTest.error || "")).trim(), action: { label: t("attention.retest"), run: () => testProxy(p.id) } });
+      items.push({ tone: "warn", icon: "globe", title: t("attention.proxyFailed.title", { name: pName(p) }), text: (t("attention.proxyFailed.text", { count: n }) + " " + (p.lastTest.error || "")).trim(), action: { label: t("attention.retest"), run: () => testProxy(p.id) } });
     });
     return items;
   }
@@ -778,10 +893,12 @@
   function renderAll() {
     renderChrome();
     renderOverview();
+    extCall("render");
     renderProxies();
     renderLeakGuard();
     renderSingbox();
     if (state.view === "logs") renderLogs();
+    renderRouteDialog();
   }
 
   function renderUpdated() {
@@ -991,8 +1108,17 @@
     if (!d.proxyId) return { tone: "idle", direct: true, lead: icon("router", "ic-sm"), main: t("route.direct"), sub: "" };
     const p = proxyById(d.proxyId);
     if (!p) return { tone: "warn", lead: icon("alert", "ic-sm"), main: t("exit.proxyDeleted"), sub: t("route.pickAgain") };
-    const pname = p.name || p.host;
-    if (state.testing.has(p.id)) return { tone: "info", lead: spin, main: pname, sub: t("route.testing") };
+    const pname = pName(p);
+    const st = kindStatus(p);
+    if (!st.ready) {
+      const tone = !st.tone || st.tone === "ok" ? "info" : st.tone;
+      return { tone: tone, lead: st.busy ? spin : proxyFlag(p), main: pname, sub: st.text || "" };
+    }
+    if (state.testing.has(p.id)) {
+      // The profile is up; only the exit check is still running.
+      if (st.readyText) return { tone: "ok", lead: spin, main: pname, sub: st.readyText + " · " + t("route.checkingExit") };
+      return { tone: "info", lead: spin, main: pname, sub: t("route.testing") };
+    }
     const lt = p.lastTest;
     if (!lt || !lt.status) return { tone: "info", lead: flagEl(null), main: pname, sub: t("route.notTested") };
     if (lt.status !== "ok") return { tone: "bad", lead: icon("alert-circle", "ic-sm"), main: pname, sub: t("route.failed") };
@@ -1132,8 +1258,20 @@
         h("div", { class: "exit-line" }, pill("warn", t("exit.proxyDeleted"), null, true)),
         h("div", { class: "px-sub", text: t("exit.pickAgain") }));
     }
-    const pname = p.name || p.host;
+    const pname = pName(p);
+    const st = kindStatus(p);
+    if (!st.ready) {
+      return h("div", { class: "exit" },
+        h("div", { class: "exit-line" }, st.busy ? h("span", { class: "spinner", "aria-hidden": "true" }) : null, pill(st.tone || "info", st.text || "", null, true)),
+        h("div", { class: "px-sub", text: st.problem || t("exit.via", { name: pname }) }));
+    }
     if (state.testing.has(p.id)) {
+      // The profile is up; only the exit check is still running.
+      if (st.readyText) {
+        return h("div", { class: "exit" },
+          h("div", { class: "exit-line" }, pill("ok", st.readyText, null, true), h("span", { class: "px-sub", text: t("exit.via", { name: pname }) })),
+          h("div", { class: "px-sub" }, h("span", { class: "spinner spinner-xs", "aria-hidden": "true" }), " " + t("route.checkingExit")));
+      }
       return h("div", { class: "exit" }, h("div", { class: "exit-line" }, h("span", { class: "spinner", "aria-hidden": "true" }), h("span", { class: "px-sub", text: t("exit.testing", { name: pname }) })));
     }
     const lt = p.lastTest;
@@ -1202,17 +1340,25 @@
       const ok = lt && lt.status === "ok";
       const failed = lt && lt.status && !ok;
       const users = devicesUsing(p.id).length;
+      const testing = state.testing.has(p.id);
+      // A profile whose kind reports a ready state (a connected tunnel) leads
+      // with it: that has to be readable on its own, whatever the exit check
+      // is doing.
+      const st = kindStatus(p);
+      const lead = st.ready && st.readyText ? [h("span", { class: "tone-ok-text", text: st.readyText })] : [];
       let sub;
-      if (state.testing.has(p.id)) sub = t("route.testing");
-      else if (ok) sub = [[countryName(lt), lt.city].filter(Boolean).join(", ") || t("exit.unknownPlace"), lt.exitIp ? h("span", { class: "mono", text: lt.exitIp }) : null];
-      else if (failed) sub = t("route.optFailed");
-      else sub = t("route.optNotTested");
+      if (!st.ready) {
+        sub = [st.where, st.busy ? h("span", null, h("span", { class: "spinner spinner-xs", "aria-hidden": "true" }), " " + (st.text || "")) : st.text];
+      } else if (testing) sub = lead.concat([t(st.readyText ? "route.checkingExit" : "route.testing")]);
+      else if (ok) sub = lead.concat([[countryName(lt), lt.city].filter(Boolean).join(", ") || t("exit.unknownPlace"), lt.exitIp ? h("span", { class: "mono", text: lt.exitIp }) : null]);
+      else if (failed) sub = lead.concat([t("route.optFailed")]);
+      else sub = lead.concat([t("route.optNotTested")]);
       if (Array.isArray(sub)) sub = sub.filter(Boolean).reduce((acc, part, i) => acc.concat(i ? [" · ", part] : [part]), []);
       opts.push(routeOption({
         value: p.id, checked: want === p.id, disabled: !d.mac && p.id !== current, tone: failed ? "bad" : null,
-        lead: flagEl(ok ? lt : null, true),
-        title: p.name || p.host + ":" + p.port,
-        tags: [h("span", { class: "tag tag-proto", text: PROTO_LABEL[p.protocol] || p.protocol }), p.id === current ? inUse : null],
+        lead: proxyFlag(p, true),
+        title: pName(p),
+        tags: [h("span", { class: "tag tag-proto", text: protoLabel(p.protocol) }), p.id === current ? inUse : null],
         sub: sub,
         right: [
           ok && lt.latencyMs ? h("span", { class: "latency tone-" + latencyTone(lt.latencyMs), text: fmtNum(lt.latencyMs) + " ms" }) : null,
@@ -1226,7 +1372,12 @@
     }
     $("route-target").textContent = deviceName(d) + " · " + d.ip;
     const box = $("route-options");
+    const hadFocus = !reset && box.contains(document.activeElement);
     box.replaceChildren.apply(box, opts);
+    if (hadFocus) {
+      const c = box.querySelector("input:checked") || box.querySelector("input:not(:disabled)");
+      if (c) c.focus();
+    }
     if (!state.proxies.length) {
       box.append(h("div", { class: "route-empty" },
         h("span", { text: t("route.noProxies") }),
@@ -1251,8 +1402,11 @@
     if (changed) {
       const p = sel ? proxyById(sel) : null;
       const lt = p && p.lastTest;
+      const st = p ? kindStatus(p) : READY;
+      const note = st.note || {};
       if (!sel) notes.push(noteEl("warn", "alert", t("route.note.direct")));
-      else if (lt && lt.status && lt.status !== "ok") notes.push(noteEl("bad", "alert-circle", t("route.note.failed", { name: p.name || p.host })));
+      else if (!st.ready) notes.push(noteEl(note.tone || "info", note.icon || "info", note.text || st.text || ""));
+      else if (lt && lt.status && lt.status !== "ok") notes.push(noteEl("bad", "alert-circle", t("route.note.failed", { name: pName(p) })));
       else if (!lt || !lt.status) notes.push(noteEl("info", "info", t("route.note.untested")));
       notes.push(h("p", { class: "route-restart" }, icon("refresh", "ic-sm"), h("span", { text: t("route.note.restart") })));
     }
@@ -1260,6 +1414,26 @@
     box.replaceChildren.apply(box, notes);
     box.className = notes.length ? "stack route-notes" : "";
   }
+
+  // The picker is not part of the regular render pass, and the regular refresh
+  // pauses while a dialog is open. Without this it keeps showing the state it
+  // was opened with: a tunnel that connected stays "Connecting" or "Testing".
+  let routePressed = false;
+  let routeStale = false;
+  function renderRouteDialog() {
+    if (!$("dlg-route").open) return;
+    // Replacing a row between press and release would swallow the click.
+    if (routePressed) { routeStale = true; return; }
+    renderRoutePicker(false);
+  }
+  $("route-options").addEventListener("pointerdown", () => { routePressed = true; });
+  ["pointerup", "pointercancel"].forEach((ev) => window.addEventListener(ev, () => {
+    if (!routePressed) return;
+    routePressed = false;
+    if (!routeStale) return;
+    routeStale = false;
+    setTimeout(renderRouteDialog, 0);
+  }));
 
   function openRoutePicker(d) {
     if ($("dlg-device").open) closeDialog($("dlg-device"));
@@ -1288,7 +1462,14 @@
       d.proxyId = proxyId;
       d.assigned = !!proxyId;
       const p = proxyById(proxyId);
-      if (proxyId) toast("ok", t("assign.done.proxy.title", { name: name }), t("assign.done.proxy.text", { proxy: (p && p.name) || t("common.proxyGeneric") }));
+      // The kind may have its own word for what happens next (a tunnel that
+      // starts now), and may start watching the profile.
+      const k = kindOf(p);
+      let text = "";
+      if (k && typeof k.assigned === "function") {
+        try { text = k.assigned(p) || ""; } catch (err) { console.error(err); }
+      }
+      if (proxyId) toast("ok", t("assign.done.proxy.title", { name: name }), text || t("assign.done.proxy.text", { proxy: (p && p.name) || t("common.proxyGeneric") }));
       else toast("ok", t("assign.done.direct.title", { name: name }), t("assign.done.direct.text"));
     } catch (e) {
       if (e.status === 401) return;
@@ -1340,7 +1521,7 @@
       infoRow(t("dd.status"), h("span", { text: status }))));
 
     const p = d.proxyId ? proxyById(d.proxyId) : null;
-    const pname = p && (p.name || p.host);
+    const pname = p && pName(p);
     $("dd-flush-text").textContent = [
       !d.proxyId ? t("flush.device.what.direct") : pname ? t("flush.device.what.proxy", { proxy: pname }) : t("flush.device.what.proxyUnknown"),
       t("flush.device.safe"),
@@ -1424,7 +1605,7 @@
         ps.untested ? pill("idle", t("proxies.countUntested", { count: ps.untested }), "info") : null,
       ].filter(Boolean));
     }
-    $("btn-test-all").disabled = ps.total === 0 || state.testing.size > 0;
+    $("btn-test-all").disabled = testableIds().length === 0 || state.testing.size > 0;
 
     const body = $("proxies-body");
     if (!state.loaded.proxies) {
@@ -1440,7 +1621,9 @@
     const list = state.proxies.filter((p) => {
       if (!q) return true;
       const lt = p.lastTest || {};
-      return [p.name, p.host, p.port, p.protocol, lt.exitIp, lt.country, lt.city, lt.isp].join(" ").toLowerCase().indexOf(q) !== -1;
+      const k = kindOf(p);
+      const where = k && typeof k.searchText === "function" ? [k.searchText(p)] : [p.host, p.port];
+      return [p.name, p.protocol, lt.exitIp, lt.country, lt.city, lt.isp].concat(where).join(" ").toLowerCase().indexOf(q) !== -1;
     }).sort((a, b) => (a.name || "").localeCompare(b.name || "", locale));
     if (list.length === 0) {
       body.replaceChildren(emptyRow(5, { icon: "search", title: t("proxies.noMatch.title"), text: t("proxies.noMatch.text"), action: { label: t("proxies.clearSearch"), run: () => { state.proxySearch = ""; $("proxy-search").value = ""; renderProxies(); } } }));
@@ -1450,13 +1633,17 @@
   }
 
   // Connection details worth knowing at a glance. Secrets are never shown.
+  function detailItem(label, value, title) {
+    if (!value) return null;
+    return h("span", { class: "px-detail", title: title || label + ": " + value },
+      h("span", { class: "px-detail-k", text: label }), h("span", { class: "px-detail-v", text: value }));
+  }
+
   function proxyDetails(p) {
+    const k = kindOf(p);
+    if (k && typeof k.details === "function") return k.details(p) || [];
     const out = [];
-    const item = (label, value, title) => {
-      if (!value) return;
-      out.push(h("span", { class: "px-detail", title: title || label + ": " + value },
-        h("span", { class: "px-detail-k", text: label }), h("span", { class: "px-detail-v", text: value })));
-    };
+    const item = (label, value, title) => { const el = detailItem(label, value, title); if (el) out.push(el); };
     const tr = (p.transport || "").toLowerCase();
     if (tr === "ws") item("Transport", "WebSocket" + (p.wsPath ? " " + p.wsPath : ""));
     else if (tr === "grpc") item("Transport", "gRPC" + (p.grpcServiceName ? " " + p.grpcServiceName : ""));
@@ -1536,7 +1723,10 @@
     const lat = lt && lt.status === "ok" && lt.latencyMs ? h("span", { class: "latency tone-" + latencyTone(lt.latencyMs), text: fmtNum(lt.latencyMs) + " ms" }) : h("span", { class: "muted", text: "-" });
 
     const inUse = users.length > 0;
-    const pname = p.name || p.host;
+    const pname = pName(p);
+    const k = kindOf(p);
+    const st = kindStatus(p);
+    const testBlocked = !st.ready;
     const delBtn = h("button", {
       class: "btn btn-icon btn-sm btn-ghost", type: "button",
       "aria-label": inUse ? t("proxy.delete.blockedAria", { count: users.length }) : t("proxy.delete.aria", { name: pname }),
@@ -1548,19 +1738,23 @@
     return h("tr", { dataset: { id: p.id }, class: testing ? "is-busy" : "" },
       h("td", { class: "cell-main" },
         h("div", { class: "px-head" },
-          flagEl(lt && lt.status === "ok" ? lt : null, true),
+          proxyFlag(p, true),
           h("div", { style: "min-width:0" },
-            h("div", { class: "px-name" }, h("span", { text: p.name || p.host }), h("span", { class: "tag tag-proto", text: PROTO_LABEL[p.protocol] || p.protocol }),
+            h("div", { class: "px-name" }, h("span", { text: pname }), h("span", { class: "tag tag-proto", text: protoLabel(p.protocol) }),
               p.tls || p.protocol === "https" || p.protocol === "trojan" || p.security === "tls" ? h("span", { class: "tag", title: t("proxy.tlsTitle") }, icon("lock", "ic-sm"), "TLS") : null,
               p.security === "reality" ? h("span", { class: "tag", title: t("proxy.realityTitle") }, icon("lock", "ic-sm"), "REALITY") : null),
-            h("div", { class: "px-host", text: p.host + ":" + p.port }))),
+            h("div", { class: "px-host", text: proxyAddr(p) }))),
         h("div", { class: "px-details" }, proxyDetails(p))),
       h("td", { "data-label": t("col.testResult"), class: "cell-full" }, testCell),
       h("td", { "data-label": t("col.latency") }, lat),
       h("td", { "data-label": t("col.users"), class: "cell-full" }, usersCell(users)),
       h("td", { class: "col-actions" },
         h("div", { class: "row-actions" },
-          h("button", { class: "btn btn-sm btn-secondary", type: "button", disabled: testing, onclick: () => testProxy(p.id) }, icon("activity", "ic-sm"), h("span", { class: "hide-sm", text: t("proxy.test") })),
+          h("button", {
+            class: "btn btn-sm btn-secondary", type: "button", disabled: testing || testBlocked,
+            title: testBlocked ? st.testTitle || st.text || null : null, onclick: () => testProxy(p.id),
+          }, icon("activity", "ic-sm"), h("span", { class: "hide-sm", text: t("proxy.test") })),
+          k && typeof k.rowActions === "function" ? k.rowActions(p) : null,
           h("button", { class: "btn btn-icon btn-sm btn-ghost", type: "button", "aria-label": t("proxy.edit.aria", { name: pname }), title: t("proxy.edit.title"), onclick: () => openProxyDialog(p.id) }, icon("edit", "ic-sm")),
           delBtn)));
   }
@@ -1571,9 +1765,11 @@
     if (state.testing.has(id)) return null;
     state.testing.add(id);
     renderProxies();
+    if (state.loaded.devices) renderDevices();
+    renderRouteDialog();
     let result = null;
     const p = proxyById(id);
-    const name = p ? p.name || p.host : t("common.proxyGeneric");
+    const name = p ? pName(p) : t("common.proxyGeneric");
     try {
       result = await api("POST", "/api/proxies/" + encodeURIComponent(id) + "/test");
       if (p && result) p.lastTest = result;
@@ -1590,13 +1786,19 @@
       renderChrome();
       renderAttention();
       renderMetrics();
+      renderRouteDialog();
     }
     return result;
   }
 
+  // A profile whose kind is not ready (a tunnel still down) cannot be tested.
+  function testableIds() {
+    return state.proxies.filter((p) => kindStatus(p).ready).map((p) => p.id);
+  }
+
   $("btn-test-all").addEventListener("click", async () => {
     const btn = $("btn-test-all");
-    const ids = state.proxies.map((p) => p.id);
+    const ids = testableIds();
     if (!ids.length) return;
     let ok = 0;
     for (let i = 0; i < ids.length; i++) {
@@ -1612,8 +1814,8 @@
   });
 
   async function deleteProxy(p) {
-    const name = p.name || p.host;
-    const ok = await confirmAction({ tone: "bad", icon: "trash", title: t("proxy.delete.confirmTitle", { name: name }), text: p.host + ":" + p.port + "\n" + t("proxy.delete.irreversible"), ok: t("proxy.delete.title") });
+    const name = pName(p);
+    const ok = await confirmAction({ tone: "bad", icon: "trash", title: t("proxy.delete.confirmTitle", { name: name }), text: proxyAddr(p) + "\n" + t("proxy.delete.irreversible"), ok: t("proxy.delete.title") });
     if (!ok) return;
     try {
       await api("DELETE", "/api/proxies/" + encodeURIComponent(p.id));
@@ -1641,6 +1843,7 @@
 
   // Which field groups apply to the selected protocol.
   function visibility(proto) {
+    const kind = kinds[proto] || null;
     const tls = PF("tls").checked;
     const sec = PF("security").value;
     const transport = PF("transport").value;
@@ -1663,7 +1866,9 @@
       transport: isV2,
       ws: isV2 && transport === "ws",
       grpc: isV2 && transport === "grpc",
-      udp: proto !== "http" && proto !== "https",
+      udp: !kind && proto !== "http" && proto !== "https",
+      server: !kind,
+      advanced: !kind,
     };
   }
 
@@ -1673,6 +1878,8 @@
     const proto = PF("protocol").value;
     const vis = visibility(proto);
     document.querySelectorAll("#form-proxy [data-show]").forEach((el) => { el.hidden = !vis[el.dataset.show]; });
+    // Sections an extension adds for its own protocol carry data-kind.
+    document.querySelectorAll("#form-proxy [data-kind]").forEach((el) => { el.hidden = el.dataset.kind !== proto; });
     // Username only for http/https/socks5; the auth grid also hosts the password.
     PF("username").closest(".field").hidden = !vis.username;
     const required = proto === "shadowsocks" || proto === "trojan";
@@ -1685,6 +1892,10 @@
     $("pf-uuid-hint").hidden = !(sameProto && editing.hasUuid);
     // Auto-open "advanced" when a WS/gRPC/REALITY field needs input.
     if (vis.reality && !PF("advanced").open) PF("advanced").open = true;
+    const form = (kinds[proto] && kinds[proto].form) || null;
+    PF("name").placeholder = (form && form.namePlaceholder && form.namePlaceholder()) || t("proxyForm.namePlaceholder");
+    if (form && typeof form.prepare === "function") form.prepare();
+    renderProxyDialogTitle();
   }
 
   ["protocol", "tls", "security", "transport"].forEach((id) => PF(id).addEventListener("change", applyVisibility));
@@ -1704,7 +1915,9 @@
   }
 
   function clearFormErrors() {
-    ["host", "port", "password", "uuid", "publickey"].forEach((id) => setFieldError(id, ""));
+    const ids = ["host", "port", "password", "uuid", "publickey"];
+    Object.keys(kinds).forEach((k) => { const f = kinds[k].form; if (f && f.errorIds) ids.push.apply(ids, f.errorIds); });
+    ids.forEach((id) => setFieldError(id, ""));
     $("proxy-form-error").hidden = true;
   }
 
@@ -1730,6 +1943,18 @@
     selectTab(toManual ? "manual" : "paste", false);
     (toManual ? $("tab-manual") : $("tab-paste")).focus();
   });
+
+  function kindForm(proto) {
+    const k = kinds[proto];
+    return (k && k.form) || null;
+  }
+  function forEachForm(fn) {
+    Object.keys(kinds).forEach((name) => {
+      const f = kinds[name].form;
+      if (!f) return;
+      try { fn(f, name); } catch (e) { console.error("extension form hook failed", e); }
+    });
+  }
 
   function fillForm(p) {
     p = p || {};
@@ -1757,6 +1982,8 @@
     PF("grpc").value = p.grpcServiceName || "";
     PF("insecure").checked = !!p.insecure;
     PF("udp").checked = !!p.udp;
+    // Every extension resets its own fields, whatever the protocol.
+    forEachForm((f) => { if (typeof f.fill === "function") f.fill(p); });
     resetReveal(PF("password"));
     resetReveal(PF("uuid"));
     PF("advanced").open = !!(p.sni || p.fingerprint || p.publicKey || p.flow || p.transport === "ws" || p.transport === "grpc" || p.insecure || p.udp);
@@ -1771,6 +1998,8 @@
     const proto = PF("protocol").value;
     const vis = visibility(proto);
     const val = (id) => PF(id).value.trim();
+    const kf = kindForm(proto);
+    if (kf && typeof kf.read === "function") return Object.assign({ name: val("name"), protocol: proto }, kf.read());
     const out = {
       name: val("name"),
       protocol: proto,
@@ -1808,6 +2037,12 @@
   function validate(data) {
     let first = null;
     const fail = (id, msg) => { setFieldError(id, msg); if (!first) first = id; };
+    const kf = kindForm(data.protocol);
+    if (kf) {
+      if (typeof kf.validate === "function") kf.validate(data, fail);
+      if (first) PF(first).focus();
+      return !first;
+    }
     if (!data.host) fail("host", t("validate.hostRequired"));
     else if (!HOST_RE.test(data.host) && !(data.host.indexOf(":") !== -1 && IPV6_RE.test(data.host))) fail("host", t("validate.hostInvalid"));
     if (!(Number.isInteger(data.port) && data.port >= 1 && data.port <= 65535)) fail("port", t("validate.portRange"));
@@ -1831,26 +2066,37 @@
     el.textContent = t(key);
   }
 
+  // Title and submit label follow the chosen protocol, so an extension's
+  // profile (a tunnel, say) is never called a proxy.
   function renderProxyDialogTitle() {
     const el = $("dlg-proxy-title");
-    if (!editing) { setKeyed(el, "proxyForm.titleAdd"); return; }
+    const kf = kindForm(PF("protocol").value) || {};
+    if (!editing) {
+      setKeyed(el, kf.titleAdd || "proxyForm.titleAdd");
+      setKeyed($("btn-proxy-submit").querySelector(".btn-label"), kf.submitAdd || "proxyForm.submitAdd");
+      return;
+    }
     el.removeAttribute("data-i18n");
-    el.textContent = t("proxyForm.titleEdit", { name: editing.name || editing.host });
+    el.textContent = t(kf.titleEdit || "proxyForm.titleEdit", { name: pName(editing) });
   }
 
-  async function openProxyDialog(id) {
+  async function openProxyDialog(id, opts) {
     const dlg = $("dlg-proxy");
     editing = null;
     $("import-result").hidden = true;
     if (!id) {
-      renderProxyDialogTitle();
-      $("proxy-tabs").hidden = false;
+      const proto = (opts && opts.protocol) || "";
+      const kf = kindForm(proto);
+      // An extension's profile has no share link, so the paste tab is of no use.
+      $("proxy-tabs").hidden = !!kf;
       $("import-text").value = "";
-      setKeyed($("btn-proxy-submit").querySelector(".btn-label"), "proxyForm.submitAdd");
-      fillForm(null);
-      selectTab("paste", false);
+      fillForm(kf ? { protocol: proto } : null);
+      renderProxyDialogTitle();
+      selectTab(kf ? "manual" : "paste", false);
       openDialog(dlg);
-      $("import-text").focus();
+      if (kf && typeof kf.focus === "function") kf.focus();
+      else if (kf) PF("name").focus();
+      else $("import-text").focus();
       return;
     }
     let p;
@@ -1868,6 +2114,14 @@
     selectTab("manual", false);
     openDialog(dlg);
     PF("name").focus();
+  }
+
+  // Lets the extension that owns a protocol react to a saved profile.
+  function kindSaved(p) {
+    const k = kindOf(p);
+    if (k && typeof k.saved === "function") {
+      try { k.saved(p); } catch (e) { console.error("extension saved hook failed", e); }
+    }
   }
 
   $("btn-add-proxy").addEventListener("click", () => openProxyDialog(null));
@@ -1896,13 +2150,21 @@
       if (editing) {
         await api("PUT", "/api/proxies/" + encodeURIComponent(editing.id), payload);
         closeDialog($("dlg-proxy"));
-        toast("ok", t("proxyForm.saved.title", { name: payload.name || payload.host }), t("proxyForm.saved.text"));
+        const kf = kindForm(payload.protocol);
+        toast("ok", t("proxyForm.saved.title", { name: pName(payload) }), t((kf && kf.savedText) || "proxyForm.saved.text"));
+        kindSaved(payload);
       } else {
         const created = await api("POST", "/api/proxies", payload);
         closeDialog($("dlg-proxy"));
         const cid = created && created.id;
-        toast("ok", t("proxyForm.added.title", { name: (created && created.name) || payload.host }), t("proxyForm.added.text"),
-          cid ? { actions: [{ label: t("exit.testNow"), run: () => testProxy(cid) }] } : null);
+        const kf = kindForm(payload.protocol);
+        if (kf) {
+          toast("ok", t("proxyForm.added.title", { name: pName(created || payload) }), t(kf.addedText || "proxyForm.added.text"));
+          kindSaved(created || payload);
+        } else {
+          toast("ok", t("proxyForm.added.title", { name: (created && created.name) || payload.host }), t("proxyForm.added.text"),
+            cid ? { actions: [{ label: t("exit.testNow"), run: () => testProxy(cid) }] } : null);
+        }
       }
       await refreshAll(false);
     } catch (ex) {
@@ -2220,7 +2482,33 @@
     else refreshAll(false);
   });
 
-  window.I18N.ready.then(() => {
+  // Starts the extensions registered through window.PGW.register. Their
+  // scripts are deferred after this one, so all of them are in by the time
+  // the catalog is ready. Each gets the helpers it may build on; a failing
+  // extension is logged and skipped so the core still boots.
+  async function startExtensions() {
+    const host = {
+      $, h, icon, setIcon, t, api, load, state, toast, toastError, errorText, confirmAction,
+      openDialog, closeDialog, adoptDialog, setBusy, setTone, setKeyed, clear, pill,
+      fmtAgo, fmtDateTime, fmtClock, countryName, flagEmoji, flagEl, validCC,
+      get locale() { return locale; },
+      proxyById, devicesUsing, deviceName, pName, proxyAddr, proxyFlag, kindStatus, detailItem, PF, setFieldError, logLevel,
+      testProxy, openProxyDialog, refreshAll, renderAll, renderProxies, renderDevices, renderChrome,
+      renderAttention, renderRouteDialog, renderRoutePicker, renderTablesWhenFree, tablesInUse,
+    };
+    const waits = [];
+    for (const fn of registered) {
+      let x;
+      try { x = fn(host); } catch (e) { console.error("extension failed to start", e); continue; }
+      if (!x) continue;
+      exts.push(x);
+      if (x.protocols) Object.keys(x.protocols).forEach((name) => { kinds[name] = x.protocols[name]; });
+      if (x.ready) waits.push(Promise.resolve(x.ready).catch((e) => console.error("extension not ready", e)));
+    }
+    await Promise.all(waits);
+  }
+
+  window.I18N.ready.then(startExtensions).then(() => {
     window.I18N.apply(document);
     refreshLocale();
     initLangSelects();

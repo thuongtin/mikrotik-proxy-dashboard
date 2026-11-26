@@ -2,15 +2,19 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -56,6 +60,8 @@ type Server struct {
 	supervisor *singbox.Supervisor
 	mikrotik   *mikrotik.Client
 	staticFS   fs.FS
+	etags      sync.Map   // static path -> ETag
+	index      *indexPage // index.html with extensions linked in
 	mux        *http.ServeMux
 
 	// opMu serializes operations that change router rules, state and the
@@ -63,6 +69,11 @@ type Server struct {
 	opMu sync.Mutex
 	// applyConfig hands a generated configuration to sing-box.
 	applyConfig func([]byte) error
+	// singboxLoaded is when the running sing-box was started with its
+	// configuration (UnixNano, taken just before applyConfig), 0 before.
+	singboxLoaded atomic.Int64
+	// ext holds the state of the edition's extensions, if any.
+	ext extension
 }
 
 // NewServer initializes the HTTP API and frontend router.
@@ -83,6 +94,14 @@ func NewServer(
 		staticFS:    staticFS,
 		mux:         http.NewServeMux(),
 		applyConfig: sup.ApplyConfig,
+	}
+
+	if staticFS != nil {
+		idx, err := buildIndex(staticFS)
+		if err != nil {
+			log.Printf("index.html not prepared, serving it as embedded: %v", err)
+		}
+		s.index = idx
 	}
 
 	s.routes()
@@ -126,6 +145,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/api/system/flush-all", s.requireAuth(s.requireRouter(s.handleSystemFlushAll)))
 	s.mux.HandleFunc("/api/system/logs", s.requireAuth(s.handleSystemLogs))
 
+	s.extensionRoutes()
+
 	// Embedded Static Frontend
 	if s.staticFS != nil {
 		fileServer := http.FileServer(http.FS(s.staticFS))
@@ -144,10 +165,21 @@ func (s *Server) routes() {
 			if err != nil {
 				// Fallback to index.html for SPA client-side routing
 				r.URL.Path = "/"
+				path = "index.html"
 			} else {
 				_ = f.Close()
 			}
+			if path == "index.html" && s.serveIndex(w, r) {
+				return
+			}
 
+			// Embedded files carry no modification time, so without these
+			// headers a browser may keep the old UI after an upgrade.
+			// FileServer answers If-None-Match against the ETag set here.
+			w.Header().Set("Cache-Control", "no-cache")
+			if tag := s.staticETag(path); tag != "" {
+				w.Header().Set("ETag", tag)
+			}
 			fileServer.ServeHTTP(w, r)
 		})
 	}
@@ -775,6 +807,9 @@ func (s *Server) handleProxies(w http.ResponseWriter, r *http.Request) {
 			s.jsonError(w, http.StatusBadRequest, tr.T("api.proxy.invalid", "err", err))
 			return
 		}
+		if !s.checkTunnelProfile(w, tr, &p) {
+			return
+		}
 
 		s.opMu.Lock()
 		defer s.opMu.Unlock()
@@ -897,6 +932,9 @@ func (s *Server) handleProxyTest(w http.ResponseWriter, r *http.Request, id stri
 		s.jsonError(w, http.StatusNotFound, tr.T("api.proxy.not_found"))
 		return
 	}
+	if s.tunnelTestBlocked(w, tr, p) {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
@@ -969,9 +1007,13 @@ func (s *Server) handleProxyUpdate(w http.ResponseWriter, r *http.Request, id st
 		s.jsonError(w, http.StatusBadRequest, tr.T("api.proxy.invalid", "err", err))
 		return
 	}
+	if !s.checkTunnelProfile(w, tr, &updated) {
+		return
+	}
 
 	// A test result describes one endpoint; it stays only if that is unchanged.
-	if updated.Protocol == existing.Protocol && updated.Host == existing.Host && updated.Port == existing.Port {
+	if updated.Protocol == existing.Protocol && updated.Host == existing.Host && updated.Port == existing.Port &&
+		updated.TunnelLocation == existing.TunnelLocation && updated.TunnelTransport == existing.TunnelTransport {
 		updated.LastTest = existing.LastTest
 	}
 
@@ -1133,10 +1175,36 @@ func (s *Server) handleSystemLogs(w http.ResponseWriter, r *http.Request) {
 	s.json(w, http.StatusOK, logs)
 }
 
+// reloadSingbox applies the saved state to sing-box, then starts or stops
+// tunnels to match it. The tunnels follow the state even when sing-box
+// rejects the config: callers roll the state back and reload again.
 func (s *Server) reloadSingbox() error {
+	defer s.syncTunnels()
 	cfgBytes, err := singbox.GenerateConfig(s.cfg, s.state)
 	if err != nil {
 		return err
 	}
-	return s.applyConfig(cfgBytes)
+	// Taken before the restart, so an interface that disappears during it
+	// still counts as gone after the load.
+	start := time.Now()
+	if err := s.applyConfig(cfgBytes); err != nil {
+		return err
+	}
+	s.singboxLoaded.Store(start.UnixNano())
+	return nil
+}
+
+// staticETag returns a content hash for an embedded file, computed once.
+func (s *Server) staticETag(path string) string {
+	if v, ok := s.etags.Load(path); ok {
+		return v.(string)
+	}
+	b, err := fs.ReadFile(s.staticFS, path)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	tag := `"` + hex.EncodeToString(sum[:8]) + `"`
+	s.etags.Store(path, tag)
+	return tag
 }

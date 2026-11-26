@@ -428,6 +428,7 @@
   "route.applying": "Применение...",
   "route.pickAgain": "Его прокси удалён. Выберите новый маршрут.",
   "route.testing": "Проверка...",
+  "route.checkingExit": "Проверка выходного IP...",
   "route.notTested": "Ещё не проверен, страна неизвестна",
   "route.failed": "Прокси не работает, трафик заблокирован",
   "route.via": "через {name} · {ms} мс",

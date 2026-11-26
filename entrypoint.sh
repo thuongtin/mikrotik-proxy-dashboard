@@ -17,6 +17,10 @@ if [ -z "$CONTAINER_GW" ]; then
     fi
 fi
 
+# proxy-dash reads both: features that open their own sockets bind them to
+# VETH_IF so they skip tun0, and resolve names through CONTAINER_GW.
+export VETH_IF CONTAINER_GW
+
 # Target LAN CIDR
 LAN_CIDR="${LAN_CIDR:-10.88.88.0/24}"
 
@@ -141,18 +145,64 @@ export FORWARD_GUARD_STATUS
 DATA_DIR="${DATA_DIR:-/data}"
 mkdir -p "$DATA_DIR"
 
-# If a custom binary or command is passed as first argument, execute it
-if [ "$#" -gt 0 ]; then
-    if [ "$1" = "sing-box" ]; then
-        shift
-        exec /usr/local/bin/sing-box "$@"
-    elif [ "$1" = "proxy-dash" ]; then
-        shift
-        exec /usr/local/bin/proxy-dash "$@"
-    elif command -v "$1" >/dev/null 2>&1; then
-        exec "$@"
-    fi
+# Pick the command: a known binary or any command passed as the first
+# argument, otherwise proxy-dash with the arguments as its flags.
+if [ "$1" = "sing-box" ]; then
+    shift
+    set -- /usr/local/bin/sing-box "$@"
+elif [ "$1" = "proxy-dash" ]; then
+    shift
+    set -- /usr/local/bin/proxy-dash "$@"
+elif [ "$#" -gt 0 ] && command -v "$1" >/dev/null 2>&1; then
+    :
+else
+    set -- /usr/local/bin/proxy-dash "$@"
 fi
 
-# Execute application
-exec /usr/local/bin/proxy-dash "$@"
+# --- PID 1 -----------------------------------------------------------------
+# This shell stays PID 1 instead of exec'ing the command, for two reasons:
+#
+# 1. RouterOS only sends the stop signal when PID 1 has a handler for it: it
+#    reads SigCgt in /proc/1/status and, when the bit is clear, logs
+#    "signal 15 (Terminated) not caught, kill immediately" and sends SIGKILL,
+#    skipping stop-time. tini blocks signals and collects them with
+#    sigtimedwait, so it counts as "not caught"; a shell trap is a real handler.
+# 2. Processes orphaned inside the container (helpers the dashboard starts, ip) are
+#    re-parented to PID 1. ash reaps every child while it waits, so they do
+#    not pile up as zombies.
+#
+# Every stop-like signal is forwarded to the command as SIGTERM: proxy-dash
+# handles SIGTERM, and a background job of a non-interactive shell starts with
+# SIGINT and SIGQUIT ignored. Only the command itself is signalled: proxy-dash
+# stops its own children, and a group-wide signal would race that shutdown.
+set +e
+child=""
+stop_requested=""
+
+forward_stop() {
+    stop_requested=1
+    if [ -n "$child" ]; then
+        kill -TERM "$child" 2>/dev/null
+    fi
+}
+trap forward_stop TERM INT HUP QUIT
+
+# A background job of a non-interactive shell gets /dev/null as stdin; hand it
+# the real one through fd 3 so `proxy-dash --hash-password` can read a pipe.
+exec 3<&0
+"$@" 0<&3 3<&- &
+child=$!
+exec 3<&-
+# A signal that arrived before the command started is delivered now.
+if [ -n "$stop_requested" ]; then
+    kill -TERM "$child" 2>/dev/null
+fi
+
+# wait returns early (status > 128) whenever a trapped signal arrives, so keep
+# waiting until the command has really exited.
+while :; do
+    wait "$child"
+    status=$?
+    kill -0 "$child" 2>/dev/null || break
+done
+exit "$status"

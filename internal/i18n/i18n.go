@@ -1,7 +1,9 @@
 // Package i18n localizes user-facing API messages.
 //
 // Catalogs are flat JSON objects (key -> message) embedded from
-// locales/<lang>.json. English is the reference catalog: a key missing from
+// locales/<lang>.json. An edition can add its own messages in
+// locales/<name>.<lang>.json; they are merged into <lang>, and a key defined
+// twice is an error. English is the reference catalog: a key missing from
 // another language falls back to English, then to the key itself.
 //
 // Messages use named placeholders such as {count} or {err}. Counted messages
@@ -13,6 +15,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"path"
 	"sort"
@@ -42,15 +45,15 @@ var localeFS embed.FS
 var catalogs = mustLoadCatalogs()
 
 func mustLoadCatalogs() map[string]map[string]string {
-	out, err := loadCatalogs()
+	out, err := loadCatalogs(localeFS)
 	if err != nil {
 		panic(err)
 	}
 	return out
 }
 
-func loadCatalogs() (map[string]map[string]string, error) {
-	entries, err := localeFS.ReadDir("locales")
+func loadCatalogs(fsys fs.FS) (map[string]map[string]string, error) {
+	entries, err := fs.ReadDir(fsys, "locales")
 	if err != nil {
 		return nil, fmt.Errorf("i18n: read embedded locales: %w", err)
 	}
@@ -60,8 +63,10 @@ func loadCatalogs() (map[string]map[string]string, error) {
 		if e.IsDir() || path.Ext(name) != ".json" {
 			continue
 		}
-		lang := strings.TrimSuffix(name, ".json")
-		data, err := localeFS.ReadFile("locales/" + name)
+		// "vi.json" or "<extension>.vi.json": the language is the last part.
+		base := strings.TrimSuffix(name, ".json")
+		lang := base[strings.LastIndex(base, ".")+1:]
+		data, err := fs.ReadFile(fsys, "locales/"+name)
 		if err != nil {
 			return nil, fmt.Errorf("i18n: read %s: %w", name, err)
 		}
@@ -69,7 +74,17 @@ func loadCatalogs() (map[string]map[string]string, error) {
 		if err := json.Unmarshal(data, &msgs); err != nil {
 			return nil, fmt.Errorf("i18n: parse %s: %w", name, err)
 		}
-		out[lang] = msgs
+		dst, ok := out[lang]
+		if !ok {
+			dst = make(map[string]string, len(msgs))
+			out[lang] = dst
+		}
+		for k, v := range msgs {
+			if _, dup := dst[k]; dup {
+				return nil, fmt.Errorf("i18n: %s: key %q is already defined for %s", name, k, lang)
+			}
+			dst[k] = v
+		}
 	}
 	if _, ok := out[Default]; !ok {
 		return nil, fmt.Errorf("i18n: missing %s.json", Default)

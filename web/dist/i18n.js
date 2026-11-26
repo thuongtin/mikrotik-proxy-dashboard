@@ -6,6 +6,10 @@
  * plural forms use the suffixes _zero/_one/_two/_few/_many/_other selected by
  * Intl.PluralRules from a numeric `count` param.
  *
+ * An extension adds its own strings with I18N.extend(name), which merges
+ * locales/<name>.<code>.json into each loaded catalog. A key the core
+ * catalog already has is kept, and the clash is logged.
+ *
  * Contract with the backend: the chosen language is stored in localStorage
  * "pgw-lang" and in the cookie "pgw_lang" so the server can localize API
  * messages.
@@ -28,6 +32,8 @@
 
   var catalogs = {};       // code -> flat object
   var pending = {};        // code -> Promise<object>
+  var extensions = [];     // names passed to I18N.extend
+  var extPending = {};     // code + "/" + name -> Promise<boolean>
   var listeners = [];
   var pluralRules = null;
   var numberFormat = null;
@@ -84,16 +90,23 @@
     return DEFAULT_LANG;
   }
 
-  function load(code) {
-    if (catalogs[code]) return Promise.resolve(catalogs[code]);
-    if (pending[code]) return pending[code];
-    pending[code] = fetch("locales/" + code + ".json", { credentials: "same-origin", cache: "no-cache" })
+  function fetchCatalog(path) {
+    return fetch(path, { credentials: "same-origin", cache: "no-cache" })
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json(); // A missing file falls back to index.html and fails to parse here.
       })
       .then(function (data) {
         if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("invalid catalog");
+        return data;
+      });
+  }
+
+  function load(code) {
+    if (catalogs[code]) return Promise.resolve(catalogs[code]);
+    if (pending[code]) return pending[code];
+    pending[code] = fetchCatalog("locales/" + code + ".json")
+      .then(function (data) {
         catalogs[code] = data;
         return data;
       })
@@ -103,6 +116,47 @@
         return null;
       });
     return pending[code];
+  }
+
+  // Merges one extension's strings into the loaded catalog of a language.
+  // A language the extension has no file for falls back to English per key.
+  function loadExt(code, name) {
+    var key = code + "/" + name;
+    if (extPending[key]) return extPending[key];
+    extPending[key] = load(code).then(function (cat) {
+      if (!cat) { delete extPending[key]; return false; }
+      return fetchCatalog("locales/" + name + "." + code + ".json").then(function (data) {
+        Object.keys(data).forEach(function (k) {
+          if (Object.prototype.hasOwnProperty.call(cat, k)) {
+            if (window.console) console.warn("[i18n] " + name + " redefines " + k + "; keeping the core string");
+            return;
+          }
+          cat[k] = data[k];
+        });
+        return true;
+      });
+    }).catch(function (err) {
+      if (window.console) console.warn("[i18n] could not load " + name + " strings for " + code + ": " + err.message);
+      delete extPending[key];
+      return false;
+    });
+    return extPending[key];
+  }
+
+  // A language's catalog with the strings of every extension merged in.
+  function loadAll(code) {
+    return load(code).then(function (cat) {
+      if (!cat) return null;
+      return Promise.all(extensions.map(function (name) { return loadExt(code, name); })).then(function () { return cat; });
+    });
+  }
+
+  function extend(name) {
+    if (!/^[a-z0-9-]+$/.test(String(name || ""))) return Promise.reject(new Error("invalid extension name"));
+    if (extensions.indexOf(name) < 0) extensions.push(name);
+    var codes = [DEFAULT_LANG];
+    if (I18N.lang !== DEFAULT_LANG) codes.push(I18N.lang);
+    return Promise.all(codes.map(function (c) { return loadExt(c, name); })).then(function () { return I18N.lang; });
   }
 
   function setActive(code) {
@@ -187,7 +241,7 @@
 
   function setLang(code) {
     var next = normalize(code) || DEFAULT_LANG;
-    return Promise.all([load(DEFAULT_LANG), next === DEFAULT_LANG ? null : load(next)]).then(function (res) {
+    return Promise.all([loadAll(DEFAULT_LANG), next === DEFAULT_LANG ? null : loadAll(next)]).then(function (res) {
       if (next !== DEFAULT_LANG && !res[1]) next = DEFAULT_LANG; // Catalog failed: stay usable in English.
       // Persist the language actually shown so the server localizes API messages to match the UI.
       persist(next);
@@ -215,6 +269,7 @@
     apply: apply,
     setLang: setLang,
     onChange: onChange,
+    extend: extend,
     has: function (key) { return typeof lookup(key) === "string"; },
     ready: null
   };

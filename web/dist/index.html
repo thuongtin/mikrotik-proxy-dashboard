@@ -372,7 +372,7 @@
             </select>
           </div>
         </div>
-        <div class="grid-host">
+        <div class="grid-host" data-show="server">
           <div class="field">
             <label for="pf-host"><span data-i18n="proxyForm.host">Host or IP</span> <span class="req" aria-hidden="true">*</span></label>
             <input id="pf-host" name="host" required autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="proxy.example.com">
@@ -457,7 +457,7 @@
           <span class="switch-label"><span data-i18n="proxyForm.tls">Enable TLS</span><span class="switch-hint" data-i18n="proxyForm.tlsHint">Encrypts the connection to the proxy server</span></span>
         </label>
 
-        <details class="advanced" id="pf-advanced">
+        <details class="advanced" id="pf-advanced" data-show="advanced">
           <summary><svg class="ic ic-sm"><use href="#i-chevron-down"></use></svg><span data-i18n="proxyForm.advanced">Advanced options</span></summary>
           <div class="stack">
             <div class="grid-2" data-show="tlsOpts">

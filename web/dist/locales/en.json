@@ -382,6 +382,7 @@
   "route.applying": "Applying...",
   "route.pickAgain": "Its proxy was deleted. Choose a new route.",
   "route.testing": "Testing...",
+  "route.checkingExit": "Checking the exit IP...",
   "route.notTested": "Not tested yet, country unknown",
   "route.failed": "Proxy is failing, traffic is blocked",
   "route.via": "via {name} · {ms} ms",

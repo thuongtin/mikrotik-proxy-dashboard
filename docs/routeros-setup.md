@@ -179,6 +179,18 @@ Upload `dist/proxy-gw-arm64.tar` to `disk1/` and copy `router-ca.pem` into `disk
 
 A note on secrets: values in `/container/envs` live in the router configuration and appear in `/export show-sensitive`. Do not paste these values into chats, tickets or committed files.
 
+### Stopping the container
+
+On `/container/stop`, RouterOS first reads `SigCgt` in `/proc/1/status` of the container. If PID 1 has no handler for SIGTERM, RouterOS logs `signal 15 (Terminated) not caught, kill immediately` and sends SIGKILL at once, without waiting for `stop-time`. That is why `entrypoint.sh` stays PID 1 with a shell `trap` and forwards the signal to proxy-dash: do not put `tini` or `dumb-init` in front of it, because they collect signals with `sigtimedwait`, which RouterOS counts as "not caught". `scripts/build-arm64-tar.sh` checks the SigCgt bit and a real `docker stop` before it accepts an image.
+
+A clean stop logs `Shutting down gracefully...`, `proxy-dash exited cleanly` and `exited with status 0`. If the stop is cut short, raise the grace period:
+
+```routeros
+/container/set [find name=proxy-gw] stop-time=20s
+```
+
+Background: [tikoci/app-t3code#25](https://github.com/tikoci/app-t3code/issues/25).
+
 ## 5. Restrict who can open the dashboard
 
 The dashboard serves plain HTTP on port 8080. Allow only admin machines to reach it:

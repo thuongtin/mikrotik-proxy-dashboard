@@ -1,6 +1,7 @@
 package singbox
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"strings"
@@ -112,6 +113,12 @@ func TestGenerateConfigAndSingboxCheck(t *testing.T) {
 		},
 	}
 
+	// Two tunnel profiles: one used by a device, one not.
+	proxies = append(proxies,
+		&proxy.Proxy{ID: "p-tun", Name: "Tunnel NYC", Protocol: testTunnelProto, TunnelLocation: "nyc", TunnelTransport: proxy.TunnelTransportUDP, UDP: true},
+		&proxy.Proxy{ID: "p-tun-idle", Name: "Tunnel LON", Protocol: testTunnelProto, TunnelLocation: "lon", TunnelTransport: proxy.TunnelTransportTCP, UDP: true},
+	)
+
 	for _, p := range proxies {
 		if err := st.SaveProxy(p); err != nil {
 			t.Fatalf("failed to save proxy: %v", err)
@@ -128,11 +135,17 @@ func TestGenerateConfigAndSingboxCheck(t *testing.T) {
 		t.Fatalf("failed to set assignment: %v", err)
 	}
 
+	// Dev 3: Assigned to a tunnel profile
+	if err := st.SetDeviceAssignment("10.88.88.52", "00:11:22:33:44:57", "PC3", "p-tun"); err != nil {
+		t.Fatalf("failed to set assignment: %v", err)
+	}
+
 	// Generate sing-box config
 	configBytes, err := GenerateConfig(cfg, st)
 	if err != nil {
 		t.Fatalf("failed to generate config: %v", err)
 	}
+	checkTunnelOutbounds(t, configBytes)
 
 	cfgStr := string(configBytes)
 
@@ -173,5 +186,56 @@ func TestGenerateConfigAndSingboxCheck(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sing-box check failed: %v\nOutput:\n%s\nConfig:\n%s", err, string(output), cfgStr)
+	}
+}
+
+// testTunnelProto is a tunnel protocol that exists only in these tests.
+const testTunnelProto = "tunneltest"
+
+func testTunnelIface(id string) string { return "tt-" + id }
+
+func init() {
+	proxy.RegisterTunnelProtocol(testTunnelProto, proxy.TunnelProtocol{
+		Normalize: func(*proxy.Proxy) error { return nil },
+		Interface: testTunnelIface,
+	})
+}
+
+// checkTunnelOutbounds asserts that a used tunnel profile becomes a direct outbound
+// bound to its tunnel, resolving through its own DoH server, and that an
+// unused one gets no outbound at all.
+func checkTunnelOutbounds(t *testing.T, configBytes []byte) {
+	t.Helper()
+	var doc struct {
+		Outbounds []map[string]any `json:"outbounds"`
+		DNS       struct {
+			Servers []map[string]any `json:"servers"`
+		} `json:"dns"`
+	}
+	if err := json.Unmarshal(configBytes, &doc); err != nil {
+		t.Fatal(err)
+	}
+	byTag := map[string]map[string]any{}
+	for _, o := range doc.Outbounds {
+		byTag[o["tag"].(string)] = o
+	}
+	if _, ok := byTag["proxy-p-tun-idle"]; ok {
+		t.Error("unused tunnel profile got an outbound")
+	}
+	o, ok := byTag["proxy-p-tun"]
+	if !ok {
+		t.Fatal("used tunnel profile has no outbound")
+	}
+	if o["type"] != "direct" || o["bind_interface"] != testTunnelIface("p-tun") || o["domain_resolver"] != "dns-doh-p-tun" {
+		t.Errorf("tunnel outbound = %v", o)
+	}
+	found := false
+	for _, s := range doc.DNS.Servers {
+		if s["tag"] == "dns-doh-p-tun" && s["detour"] == "proxy-p-tun" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no DoH server for the tunnel profile detoured through its tunnel")
 	}
 }

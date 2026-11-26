@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func request(cookie, accept string) *http.Request {
@@ -280,5 +281,30 @@ func TestCatalogConsistency(t *testing.T) {
 			}
 		}
 		t.Logf("%s: %d keys, %d of %d messages missing (English is used)", lang, len(msgs), missing, len(enBase))
+	}
+}
+
+func TestLoadCatalogsMergesExtensions(t *testing.T) {
+	fsys := fstest.MapFS{
+		"locales/en.json":       {Data: []byte(`{"a":"A"}`)},
+		"locales/vi.json":       {Data: []byte(`{"a":"Á"}`)},
+		"locales/extra.en.json": {Data: []byte(`{"b":"B"}`)},
+		"locales/extra.vi.json": {Data: []byte(`{"b":"Bê"}`)},
+	}
+	cats, err := loadCatalogs(fsys)
+	if err != nil {
+		t.Fatalf("loadCatalogs: %v", err)
+	}
+	if len(cats) != 2 || cats["en"]["b"] != "B" || cats["vi"]["b"] != "Bê" || cats["vi"]["a"] != "Á" {
+		t.Fatalf("merged catalogs = %v", cats)
+	}
+
+	fsys["locales/dup.en.json"] = &fstest.MapFile{Data: []byte(`{"a":"again"}`)}
+	if _, err := loadCatalogs(fsys); err == nil || !strings.Contains(err.Error(), `"a"`) {
+		t.Fatalf("duplicate key error = %v", err)
+	}
+
+	if _, err := loadCatalogs(fstest.MapFS{"locales/vi.json": {Data: []byte(`{}`)}}); err == nil {
+		t.Fatal("a catalog set without en must fail")
 	}
 }

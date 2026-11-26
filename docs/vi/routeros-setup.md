@@ -179,6 +179,18 @@ Tải `dist/proxy-gw-arm64.tar` lên `disk1/` và chép `router-ca.pem` vào `di
 
 Lưu ý về bí mật: giá trị trong `/container/envs` nằm trong cấu hình router và xuất hiện khi `/export show-sensitive`. Không dán các giá trị này vào chat, ticket hay file commit.
 
+### Dừng container
+
+Khi chạy `/container/stop`, RouterOS đọc `SigCgt` trong `/proc/1/status` của container trước. Nếu PID 1 không có handler cho SIGTERM, RouterOS ghi log `signal 15 (Terminated) not caught, kill immediately` và gửi SIGKILL ngay, không chờ `stop-time`. Vì thế `entrypoint.sh` giữ vai trò PID 1 bằng `trap` của shell và chuyển tín hiệu cho proxy-dash. Đừng đặt `tini` hay `dumb-init` phía trước: chúng nhận tín hiệu bằng `sigtimedwait`, và RouterOS coi đó là "not caught". `scripts/build-arm64-tar.sh` kiểm bit SigCgt và chạy thử `docker stop` thật trước khi chấp nhận một image.
+
+Khi dừng êm, log có `Shutting down gracefully...`, `proxy-dash exited cleanly` và `exited with status 0`. Nếu thấy quá trình dừng bị cắt ngang, hãy tăng thời gian chờ:
+
+```routeros
+/container/set [find name=proxy-gw] stop-time=20s
+```
+
+Tham khảo: [tikoci/app-t3code#25](https://github.com/tikoci/app-t3code/issues/25).
+
 ## 5. Giới hạn ai mở được dashboard
 
 Dashboard chạy HTTP thuần ở cổng 8080. Chỉ cho máy quản trị truy cập:

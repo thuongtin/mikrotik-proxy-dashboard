@@ -359,6 +359,7 @@
   "route.applying": "正在应用...",
   "route.pickAgain": "它的代理已被删除，请选择新的路由。",
   "route.testing": "正在测试...",
+  "route.checkingExit": "正在检查出口 IP...",
   "route.notTested": "尚未测试，国家未知",
   "route.failed": "代理故障，流量已被阻断",
   "route.via": "经由 {name} · {ms} ms",

@@ -20,6 +20,13 @@ const (
 	ProtoVMess       = "vmess"
 )
 
+// Tunnel transports: how a tunnel reaches its server, not what the device
+// may send. A TCP tunnel still carries the device's UDP traffic.
+const (
+	TunnelTransportUDP = "udp"
+	TunnelTransportTCP = "tcp"
+)
+
 var validProtocols = map[string]bool{
 	ProtoHTTP:        true,
 	ProtoHTTPS:       true,
@@ -79,6 +86,11 @@ type Proxy struct {
 	WSHost          string `json:"wsHost,omitempty"`
 	GRPCServiceName string `json:"grpcServiceName,omitempty"`
 
+	// Tunnel profiles: the location code the tunnel provider uses and the
+	// transport ("udp" or "tcp"). Other protocols leave them empty.
+	TunnelLocation  string `json:"vpnLocation,omitempty"`
+	TunnelTransport string `json:"vpnTransport,omitempty"`
+
 	CreatedAt time.Time   `json:"createdAt"`
 	UpdatedAt time.Time   `json:"updatedAt"`
 	LastTest  *TestResult `json:"lastTest,omitempty"`
@@ -90,6 +102,13 @@ func (p *Proxy) Validate() error {
 	if !validProtocols[p.Protocol] {
 		return fmt.Errorf("unsupported protocol: %s", p.Protocol)
 	}
+
+	if tp, ok := tunnelProtocols[p.Protocol]; ok {
+		return tp.Normalize(p)
+	}
+	// Tunnel fields only mean something for a tunnel profile.
+	p.TunnelLocation = ""
+	p.TunnelTransport = ""
 
 	p.Host = strings.TrimSpace(p.Host)
 	if p.Host == "" {
@@ -144,6 +163,22 @@ func (p *Proxy) Validate() error {
 	}
 
 	return nil
+}
+
+// IsTunnel reports whether the dashboard runs a tunnel for this profile.
+func (p *Proxy) IsTunnel() bool {
+	_, ok := tunnelProtocols[p.Protocol]
+	return ok
+}
+
+// TunnelInterface is the name of the network interface that carries this
+// profile's tunnel, or "" for a profile that has no tunnel.
+func (p *Proxy) TunnelInterface() string {
+	tp, ok := tunnelProtocols[p.Protocol]
+	if !ok {
+		return ""
+	}
+	return tp.Interface(p.ID)
 }
 
 // Clone creates a deep copy of the proxy.

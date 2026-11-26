@@ -38,6 +38,33 @@ before it builds `dist/proxy-gw-arm64.tar`.
 
 Code layout and the API are described in [docs/architecture.md](docs/architecture.md).
 
+### Docker labs on macOS: never reuse your real LAN subnet
+
+When you build a Docker lab that imitates the router (for example a fake LAN
+network for end-to-end tests of device routing), give it a subnet that does not
+overlap the LAN your Mac is on. Docker Desktop and OrbStack on macOS create their
+networks through Apple's vmnet, which adds each subnet to the pf table
+`network_isolation_table_v4` in the anchor
+`com.apple.internet-sharing/network_isolation`. That anchor holds a rule
+`block drop quick inet from <table> to <table>`, so once your real LAN subnet is
+in the table, every IP packet between the Mac and the LAN is dropped: the router
+stops answering ping, SSH and HTTP, while internet access and ARP still work.
+Removing the Docker network does not always remove the entry.
+
+Check the table:
+
+```bash
+sudo pfctl -a com.apple.internet-sharing/network_isolation -t network_isolation_table_v4 -T show
+```
+
+Remove a stale entry (replace the CIDR with yours):
+
+```bash
+sudo pfctl -a com.apple.internet-sharing/network_isolation -t network_isolation_table_v4 -T delete 192.168.88.0/24
+```
+
+Only delete entries that no running Docker network still uses.
+
 ## Pull requests
 
 - Keep each pull request focused on one change.

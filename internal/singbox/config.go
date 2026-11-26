@@ -148,6 +148,18 @@ func GenerateConfig(cfg *config.Config, st *state.State) ([]byte, error) {
 	// 4. Outbounds
 	var outbounds []interface{}
 	for _, p := range allProxies {
+		if p.IsTunnel() {
+			// A tunnel outbound resolves through its own DoH server, which only
+			// exists while a device uses the profile; unused profiles have
+			// no tunnel either, so they get no outbound.
+			if !assignedProxyIDs[p.ID] {
+				continue
+			}
+			out := p.ToSingboxOutbound("proxy-" + p.ID)
+			out["domain_resolver"] = "dns-doh-" + p.ID
+			outbounds = append(outbounds, out)
+			continue
+		}
 		outbounds = append(outbounds, p.ToSingboxOutbound("proxy-"+p.ID))
 	}
 	outbounds = append(outbounds, map[string]interface{}{

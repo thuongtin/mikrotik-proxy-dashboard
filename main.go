@@ -42,6 +42,9 @@ func main() {
 	}
 
 	cfg := config.LoadFromEnv()
+	// Before any child process starts: extensions may drop secrets from the
+	// environment so that sing-box does not inherit them.
+	ext := loadExtensions(cfg)
 
 	if cfg.DashboardPasswordHash == "" {
 		log.Println("WARNING: DASHBOARD_PASSWORD_HASH environment variable is not set!")
@@ -108,6 +111,9 @@ func main() {
 	staticFS := webfs.GetStaticFS()
 	srv := internalweb.NewServer(cfg, authMgr, st, sup, mkClient, staticFS)
 
+	// 6. Optional features of this edition.
+	stopExt := ext.start(srv)
+
 	httpServer := &http.Server{
 		Addr:              cfg.ListenAddr,
 		Handler:           srv,
@@ -139,6 +145,7 @@ func main() {
 		log.Printf("HTTP shutdown error: %v", err)
 	}
 
+	stopExt()
 	sup.Stop()
 	log.Println("proxy-dash exited cleanly")
 }

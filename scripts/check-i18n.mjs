@@ -7,8 +7,13 @@
 //   - a translated key does not exist in en.json
 //   - a translation uses placeholders that differ from the English text
 //   - a value contains the em dash character (U+2014)
+//   - an extension catalog redefines a key of the core catalog
 // Warnings (exit code 0):
 //   - a key from en.json has no translation in another language (English is used)
+//
+// An extension ships its strings as <name>.<lang>.json next to the core
+// catalogs and is checked against its own <name>.en.json. For the UI, the keys
+// used in web/dist/ext/<name>.js must exist in the core or extension English.
 //
 // Usage: node scripts/check-i18n.mjs
 
@@ -25,6 +30,7 @@ const catalogs = [
     name: "UI",
     dir: join(root, "web/dist/locales"),
     sources: [join(root, "web/dist/app.js"), join(root, "web/dist/index.html")],
+    extSources: (name) => join(root, "web/dist/ext", `${name}.js`),
   },
   {
     name: "API",
@@ -125,39 +131,45 @@ function englishFor(en, key) {
   return en[`${base}_other`] ?? en[base];
 }
 
-for (const cat of catalogs) {
-  if (!existsSync(cat.dir)) {
-    error(`${cat.name}: directory ${cat.dir} not found`);
-    continue;
+// Checks one set of catalogs that share an English source: the core files
+// (<lang>.json, extension "") or one extension's (<name>.<lang>.json).
+function checkGroup(cat, ext, langs, coreEn) {
+  const label = ext ? `${cat.name} ${ext}` : cat.name;
+  const prefix = ext ? `${ext}.` : "";
+  if (!langs.includes("en")) {
+    error(`${label}: ${prefix}en.json is missing`);
+    return null;
   }
-  const files = readdirSync(cat.dir).filter((f) => f.endsWith(".json")).sort();
-  if (!files.includes("en.json")) {
-    error(`${cat.name}: en.json is missing`);
-    continue;
-  }
-  const en = loadCatalog(join(cat.dir, "en.json"));
-  if (!en) continue;
+  const en = loadCatalog(join(cat.dir, `${prefix}en.json`));
+  if (!en) return null;
   const enBases = new Set(Object.keys(en).map(baseKey));
 
-  for (const [key, where] of usedKeys(cat.sources)) {
-    if (!hasKey(en, key)) error(`${cat.name}: key "${key}" used in ${where} is missing from en.json`);
+  if (coreEn) {
+    for (const key of Object.keys(en)) {
+      if (key in coreEn) error(`${label}: key "${key}" is already defined by the core catalog`);
+    }
   }
 
-  for (const file of files) {
-    if (file === "en.json") continue;
-    const lang = file.replace(/\.json$/, "");
-    const tr = loadCatalog(join(cat.dir, file));
+  const sources = ext ? (cat.extSources ? [cat.extSources(ext)] : []) : cat.sources;
+  const known = coreEn ? { ...coreEn, ...en } : en;
+  for (const [key, where] of usedKeys(sources)) {
+    if (!hasKey(known, key)) error(`${label}: key "${key}" used in ${where} is missing from ${prefix}en.json`);
+  }
+
+  for (const lang of langs) {
+    if (lang === "en") continue;
+    const tr = loadCatalog(join(cat.dir, `${prefix}${lang}.json`));
     if (!tr) continue;
 
     let missing = 0;
     for (const base of enBases) {
       if (!hasKey(tr, base)) missing++;
     }
-    if (missing > 0) warn(`${cat.name} ${lang}: ${missing} key(s) not translated, English is used`);
+    if (missing > 0) warn(`${label} ${lang}: ${missing} key(s) not translated, English is used`);
 
     for (const [key, value] of Object.entries(tr)) {
       if (!enBases.has(baseKey(key))) {
-        error(`${cat.name} ${lang}: key "${key}" does not exist in en.json`);
+        error(`${label} ${lang}: key "${key}" does not exist in ${prefix}en.json`);
         continue;
       }
       const source = englishFor(en, key);
@@ -167,13 +179,37 @@ for (const cat of catalogs) {
       const strip = (list) => (plural ? list.filter((p) => p !== "count") : list);
       if (source !== undefined && !sameSet(strip(placeholders(value)), strip(placeholders(source)))) {
         error(
-          `${cat.name} ${lang}: key "${key}" placeholders {${placeholders(value).join("}, {")}} ` +
+          `${label} ${lang}: key "${key}" placeholders {${placeholders(value).join("}, {")}} ` +
             `do not match English {${placeholders(source).join("}, {")}}`,
         );
       }
     }
   }
-  console.log(`${cat.name}: ${files.length} catalog(s), ${enBases.size} key(s) in en.json`);
+  console.log(`${label}: ${langs.length} catalog(s), ${enBases.size} key(s) in ${prefix}en.json`);
+  return en;
+}
+
+for (const cat of catalogs) {
+  if (!existsSync(cat.dir)) {
+    error(`${cat.name}: directory ${cat.dir} not found`);
+    continue;
+  }
+  // "vi.json" belongs to the core, "<name>.vi.json" to extension <name>.
+  const groups = new Map();
+  for (const file of readdirSync(cat.dir).filter((f) => f.endsWith(".json")).sort()) {
+    const parts = file.slice(0, -".json".length).split(".");
+    if (parts.length > 2) {
+      error(`${cat.name}: ${file}: expected <lang>.json or <extension>.<lang>.json`);
+      continue;
+    }
+    const ext = parts.length === 2 ? parts[0] : "";
+    if (!groups.has(ext)) groups.set(ext, []);
+    groups.get(ext).push(parts[parts.length - 1]);
+  }
+  const coreEn = checkGroup(cat, "", groups.get("") ?? [], null);
+  for (const [ext, langs] of groups) {
+    if (ext) checkGroup(cat, ext, langs, coreEn ?? {});
+  }
 }
 
 console.log(`${errors} error(s), ${warnings} warning(s)`);

@@ -82,6 +82,9 @@ func TestProxy(ctx context.Context, p *Proxy, singboxPath string) (*TestResult, 
 	})
 }
 
+// tunnelTestDNS is the resolver a tunnel profile test queries through the tunnel.
+const tunnelTestDNS = "1.1.1.1"
+
 // TestProxyWithOptions runs an ephemeral sing-box instance to test the given proxy with specified options.
 func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*TestResult, error) {
 	singboxPath := opts.SingboxPath
@@ -99,14 +102,17 @@ func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*Tes
 
 	// 2. Build minimal sing-box ephemeral config
 	outbound := p.ToSingboxOutbound("proxy")
-	if opts.VethIF != "" {
+	tunnel := p.IsTunnel()
+	// A tunnel profile's outbound is already bound to its tunnel; binding it to
+	// the veth would test the plain uplink instead.
+	if opts.VethIF != "" && !tunnel {
 		outbound["bind_interface"] = opts.VethIF
 	}
 
 	routeCfg := map[string]interface{}{
 		"final": "proxy",
 	}
-	if opts.VethIF != "" {
+	if opts.VethIF != "" && !tunnel {
 		routeCfg["default_interface"] = opts.VethIF
 	}
 
@@ -127,7 +133,25 @@ func TestProxyWithOptions(ctx context.Context, p *Proxy, opts TestOptions) (*Tes
 		},
 	}
 
-	if opts.ContainerGW != "" {
+	if tunnel {
+		// Resolve through the tunnel too, as the production config does, so
+		// the test shows what a device on this profile sees.
+		cfg["dns"] = map[string]interface{}{
+			"servers": []interface{}{
+				map[string]interface{}{
+					"tag":         "dns-tunnel",
+					"type":        "udp",
+					"server":      tunnelTestDNS,
+					"server_port": 53,
+					"detour":      "proxy",
+				},
+			},
+			"final":    "dns-tunnel",
+			"strategy": "ipv4_only",
+		}
+		outbound["domain_resolver"] = "dns-tunnel"
+		routeCfg["default_domain_resolver"] = "dns-tunnel"
+	} else if opts.ContainerGW != "" {
 		cfg["dns"] = map[string]interface{}{
 			"servers": []interface{}{
 				map[string]interface{}{

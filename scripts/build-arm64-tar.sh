@@ -9,7 +9,29 @@ DIST_DIR="${DIST_DIR:-$ROOT_DIR/dist}"
 OUTPUT_TAR="$DIST_DIR/proxy-gw-arm64.tar"
 IMAGE_TAG="${IMAGE_TAG:-proxy-gw:arm64}"
 
-echo "=== Building mikrotik-proxy-dashboard ARM64 Container ==="
+# EDITION picks a build flavour. "public" (the default) builds this repository
+# as published. Any other value loads scripts/editions/<EDITION>.env, which can
+# set GO_BUILD_TAGS (Go build tags), EXTRA_APK_PACKAGES (runtime Alpine
+# packages) and EDITION_CHECK_CMD (a command the image must run successfully).
+EDITION="${EDITION:-public}"
+GO_BUILD_TAGS=""
+EXTRA_APK_PACKAGES=""
+EDITION_CHECK_CMD=""
+if [ "$EDITION" != "public" ]; then
+    EDITION_FILE="$SCRIPT_DIR/editions/$EDITION.env"
+    if [ ! -f "$EDITION_FILE" ]; then
+        echo "[build] ERROR: unknown edition '$EDITION' ($EDITION_FILE not found)" >&2
+        exit 1
+    fi
+    # shellcheck source=/dev/null
+    . "$EDITION_FILE"
+fi
+EDITION_ARGS=(
+    --build-arg "GO_BUILD_TAGS=$GO_BUILD_TAGS"
+    --build-arg "EXTRA_APK_PACKAGES=$EXTRA_APK_PACKAGES"
+)
+
+echo "=== Building mikrotik-proxy-dashboard ARM64 Container (edition: $EDITION) ==="
 
 # 1. Ensure OrbStack daemon is running
 if command -v orb >/dev/null 2>&1; then
@@ -31,6 +53,7 @@ else
         --target check \
         --no-cache-filter check \
         --build-arg "SKIP_VULNCHECK=${SKIP_VULNCHECK:-0}" \
+        "${EDITION_ARGS[@]}" \
         --progress plain \
         "$ROOT_DIR"
 fi
@@ -43,6 +66,7 @@ rm -f "$OUTPUT_TAR"
 echo "[build] Building Docker image for linux/arm64..."
 docker build \
     --platform linux/arm64 \
+    "${EDITION_ARGS[@]}" \
     -t "$IMAGE_TAG" \
     "$ROOT_DIR"
 
@@ -73,9 +97,58 @@ echo "$GUARD_RULES" | grep -q -- "-o tun0 -j ACCEPT" || { echo "[verify] ERROR: 
 echo "[verify] Testing proxy-dash version in container..."
 docker run --rm --platform linux/arm64 "$IMAGE_TAG" proxy-dash --version
 
+if [ -n "$EDITION_CHECK_CMD" ]; then
+    echo "[verify] Testing edition '$EDITION': $EDITION_CHECK_CMD"
+    # shellcheck disable=SC2086
+    docker run --rm --platform linux/arm64 "$IMAGE_TAG" $EDITION_CHECK_CMD
+fi
+
 echo "[verify] Testing proxy-dash --hash-password..."
 HASH_OUTPUT=$(echo "AdminTest123" | docker run --rm -i --platform linux/arm64 "$IMAGE_TAG" proxy-dash --hash-password)
 echo "Generated hash test: $HASH_OUTPUT"
+[ -n "$HASH_OUTPUT" ] || { echo "[verify] ERROR: --hash-password printed nothing (stdin not passed through?)" >&2; exit 1; }
+
+# RouterOS sends the stop signal only when PID 1 has a handler for SIGTERM
+# (bit 15 of SigCgt, mask 0x4000); otherwise it logs "signal 15 (Terminated)
+# not caught, kill immediately" and sends SIGKILL without waiting for stop-time.
+echo "[verify] Testing that PID 1 catches SIGTERM..."
+# The entrypoint logs to stdout too, so keep only the last line and make sure
+# it is a hex mask before doing arithmetic on it.
+SIGCGT=$(docker run --rm --platform linux/arm64 "$IMAGE_TAG" sh -c 'awk "/^SigCgt:/ {print \$2}" /proc/1/status' 2>/dev/null | tail -n 1)
+echo "PID 1 SigCgt: $SIGCGT"
+if ! printf '%s' "$SIGCGT" | grep -Eq '^[0-9a-fA-F]{1,16}$'; then
+    echo "[verify] ERROR: could not read SigCgt of PID 1 (got '$SIGCGT')" >&2
+    exit 1
+fi
+if [ $(( 0x$SIGCGT & 0x4000 )) -eq 0 ]; then
+    echo "[verify] ERROR: PID 1 does not catch SIGTERM; RouterOS would SIGKILL the container on stop" >&2
+    exit 1
+fi
+
+echo "[verify] Testing graceful stop (docker stop must deliver SIGTERM to the command)..."
+STOP_CID=$(docker run -d --platform linux/arm64 "$IMAGE_TAG" \
+    sh -c 'trap "echo child got SIGTERM; exit 0" TERM; while :; do sleep 0.2; done')
+sleep 2
+docker stop -t 10 "$STOP_CID" >/dev/null
+STOP_CODE=$(docker inspect -f '{{.State.ExitCode}}' "$STOP_CID")
+STOP_LOG=$(docker logs "$STOP_CID" 2>&1)
+docker rm "$STOP_CID" >/dev/null
+if [ "$STOP_CODE" != "0" ] || ! echo "$STOP_LOG" | grep -q "child got SIGTERM"; then
+    echo "$STOP_LOG" >&2
+    echo "[verify] ERROR: graceful stop failed (exit code $STOP_CODE)" >&2
+    exit 1
+fi
+echo "Graceful stop verified (exit code 0)"
+
+echo "[verify] Testing that PID 1 reaps orphaned processes..."
+ZOMBIES=$(docker run --rm --platform linux/arm64 "$IMAGE_TAG" \
+    sh -c '(sleep 0.3 &); sleep 2; grep -l "^State:[[:space:]]*Z" /proc/[0-9]*/status 2>/dev/null | wc -l')
+ZOMBIES=$(echo "$ZOMBIES" | tail -n 1 | tr -d '[:space:]')
+if [ "$ZOMBIES" != "0" ]; then
+    echo "[verify] ERROR: $ZOMBIES zombie process(es) left behind; PID 1 is not reaping orphans" >&2
+    exit 1
+fi
+echo "No zombies left"
 
 echo "[verify] Testing sample sing-box.json config with sing-box check in container..."
 SAMPLE_CFG='{
